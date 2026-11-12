@@ -1764,7 +1764,49 @@ def build_parser():
     ds.add_argument("--sem-som", action="store_true")
     dsub.add_parser("parar", help="fecha o desktop")
     dsub.add_parser("status", help="estado em JSON")
+    vmp = sub.add_parser("vm", help="roda sistemas (ISO/IMG/QCOW2…) que estão no aparelho, com QEMU na tela do Termux:X11")
+    vsub = vmp.add_subparsers(dest="vm_cmd")
+    vsub.add_parser("procurar", help="lista arquivos de sistema encontrados no aparelho (JSON)")
+    vi = vsub.add_parser("instalar", help="instala o QEMU")
+    vi.add_argument("arch", nargs="?", default="aarch64", help="aarch64 (ARM, mais rápido) ou x86_64 (PC)")
+    vs = vsub.add_parser("iniciar", help="liga a máquina virtual com o arquivo escolhido")
+    vs.add_argument("arquivo")
+    vs.add_argument("--arch", default=None)
+    vs.add_argument("--ram", type=int, default=4096, help="memória em MB")
+    vs.add_argument("--cpus", type=int, default=4)
+    vs.add_argument("--disco", default="32G", help="tamanho do disco virtual criado para ISOs")
+    vsub.add_parser("parar", help="desliga a máquina virtual")
+    vsub.add_parser("status", help="estado em JSON")
     return parser
+
+
+def vm_cli(args) -> int:
+    import portai_vm as vm
+    cmd = getattr(args, "vm_cmd", None)
+    if cmd in (None, "status"):
+        print(json.dumps(vm.status(), ensure_ascii=False))
+        return 0
+    if cmd == "procurar":
+        print(json.dumps(vm.find_images(), ensure_ascii=False))
+        return 0
+    if cmd == "parar":
+        console.print("Máquina virtual desligada." if vm.stop() else "Nenhuma máquina virtual ligada.")
+        return 0
+    try:
+        if cmd == "instalar":
+            for step in vm.install_commands(args.arch):
+                console.print(f"[dim]$ {' '.join(step)}[/]")
+                code = subprocess.run(step, check=False).returncode
+                if code:
+                    return code
+            console.print("[bright_green]QEMU instalado.[/]")
+            return 0
+        info = vm.start(args.arquivo, args.arch, args.ram, args.cpus, args.disco)
+        console.print(f"Máquina virtual ligando ({info['arch']}). Abra o app Termux:X11.")
+        return 0
+    except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+        console.print(f"[red]{exc}[/]")
+        return 1
 
 
 def desktop_cli(args) -> int:
@@ -1923,6 +1965,8 @@ def run_cli(argv: list[str] | None = None) -> int:
         return 0
     if command == "desktop":
         return desktop_cli(args)
+    if command == "vm":
+        return vm_cli(args)
     if command in ("llama", "ia"):
         return llama_cli(getattr(args, "llama_cmd", None), getattr(args, "modelo", None), getattr(args, "porta", 8080),
                          getattr(args, "ctx", 8192), getattr(args, "threads", None))

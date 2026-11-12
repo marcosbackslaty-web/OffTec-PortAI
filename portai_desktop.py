@@ -67,6 +67,72 @@ DISTRO_SESSION = {"xfce": "startxfce4", "lxqt": "startlxqt", "openbox": "openbox
 
 HOST_PACKAGES = ["termux-x11-nightly", "pulseaudio"]
 
+# Navegador + ferramentas para o "Assistente IA" dentro do desktop.
+AI_EXTRAS = {"termux": "firefox jq curl", "ubuntu": "falkon jq curl", "debian": "firefox-esr jq curl",
+             "fedora": "firefox jq curl", "archlinux": "firefox jq curl"}
+
+# Script `ia` colocado dentro do desktop. Escolha da IA: offline (llama.cpp no
+# tablet), claude, deepseek ou gemini. Chaves só existem se o usuário levar do
+# app PortAI (arquivo ~/.config/portai/ia.env, permissão 600).
+IA_SCRIPT = r"""#!/bin/sh
+# ia — assistente do PortAI dentro do desktop Linux.
+#   ia                      conversa (pergunta qual IA usar)
+#   ia "pergunta"           responde com a IA padrão
+#   ia -i claude "pergunta" escolhe: offline | claude | deepseek | gemini
+CONF="$HOME/.config/portai/ia.env"
+[ -f "$CONF" ] && . "$CONF"
+IA="${IA_PADRAO:-offline}"
+SYS="Você é o assistente do PortAI dentro de um desktop Linux rodando num tablet Android (Termux:X11). Responda em português do Brasil, direto, com comandos prontos quando útil."
+if [ "$1" = "-i" ]; then IA="$2"; shift 2; fi
+
+perguntar() {
+  q="$1"
+  case "$IA" in
+    claude)
+      [ -z "$CLAUDE_KEY" ] && { echo "Sem chave do Claude aqui. No app PortAI: Desktop → IA no desktop → Levar minhas chaves."; return 1; }
+      body=$(jq -n --arg s "$SYS" --arg q "$q" --arg m "${CLAUDE_MODEL:-claude-opus-5-5}" '{model:$m,max_tokens:16000,system:$s,messages:[{role:"user",content:$q}]}')
+      curl -s --max-time 600 https://api.anthropic.com/v1/messages -H "x-api-key: $CLAUDE_KEY" \
+        -H "anthropic-version: 2026-10-21" -H "content-type: application/json" -d "$body" \
+        | jq -r '([.content[]? | select(.type=="text") | .text] | join("")) as $t | if $t != "" then $t else (.error.message // "sem resposta") end' ;;
+    deepseek|gemini)
+      if [ "$IA" = deepseek ]; then url=https://api.deepseek.com/chat/completions; key="$DEEPSEEK_KEY"; m="${DEEPSEEK_MODEL:-deepseek-flash}"
+      else url=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions; key="$GEMINI_KEY"; m="${GEMINI_MODEL:-gemini-3.8-flash}"; fi
+      [ -z "$key" ] && { echo "Sem chave do $IA aqui. No app PortAI: Desktop → IA no desktop → Levar minhas chaves."; return 1; }
+      body=$(jq -n --arg s "$SYS" --arg q "$q" --arg m "$m" '{model:$m,messages:[{role:"system",content:$s},{role:"user",content:$q}]}')
+      curl -s --max-time 600 "$url" -H "Authorization: Bearer $key" -H "content-type: application/json" -d "$body" \
+        | jq -r '.choices[0].message.content // .error.message // "sem resposta"' ;;
+    *)
+      body=$(jq -n --arg s "$SYS" --arg q "$q" '{messages:[{role:"system",content:$s},{role:"user",content:$q}]}')
+      curl -s --max-time 600 http://127.0.0.1:8080/v1/chat/completions -H "content-type: application/json" -d "$body" \
+        | jq -r '.choices[0].message.content // .error.message // empty' \
+        || echo "A IA offline não respondeu. No app PortAI: IA → Offline → ▶ Iniciar servidor." ;;
+  esac
+}
+
+if [ $# -gt 0 ]; then perguntar "$*"; exit; fi
+echo "Assistente PortAI — escolha a IA:"
+echo "  1) Offline (llama.cpp no tablet)   2) Claude   3) DeepSeek   4) Gemini   [Enter = $IA]"
+printf "> "; read -r op
+case "$op" in 1) IA=offline;; 2) IA=claude;; 3) IA=deepseek;; 4) IA=gemini;; esac
+echo "Usando: $IA. Escreva sua pergunta (sair = Ctrl+D)."
+while printf "\nvocê> " && read -r q; do [ -n "$q" ] && { echo; perguntar "$q"; }; done
+"""
+
+LAUNCHERS = {
+    "assistente-ia.desktop": (
+        "[Desktop Entry]\nType=Application\nName=Assistente IA (PortAI)\n"
+        "Comment=Escolha a IA (offline, Claude, DeepSeek, Gemini) e converse\n"
+        "Exec=ia\nIcon=dialog-information\nTerminal=true\nCategories=Utility;\n"),
+    "ia-offline-web.desktop": (
+        "[Desktop Entry]\nType=Application\nName=IA offline no navegador (PortAI)\n"
+        "Comment=Chat da IA local do tablet (llama.cpp)\n"
+        "Exec=xdg-open http://127.0.0.1:8080\nIcon=applications-internet\nTerminal=false\nCategories=Utility;\n"),
+}
+
+
+def keys_file() -> Path:
+    return Path.home() / ".config" / "portai" / "ia.env"
+
 
 def _home() -> Path:
     return portai_toolkit.data_home()
@@ -109,13 +175,14 @@ def install_commands(system: str, desktop: str) -> list[list[str]]:
     _check(system, desktop)
     steps = [["pkg", "install", "-y", "x11-repo"]]
     if system == "termux":
-        steps.append(["pkg", "install", "-y", *HOST_PACKAGES, "dbus", *SYSTEMS["termux"]["packages"][desktop].split()])
+        steps.append(["pkg", "install", "-y", *HOST_PACKAGES, "dbus", *SYSTEMS["termux"]["packages"][desktop].split(),
+                      *AI_EXTRAS["termux"].split()])
         return steps
     fam = SYSTEMS[system]["family"]
     steps.append(["pkg", "install", "-y", *HOST_PACKAGES, "proot-distro"])
     if not rootfs(system).is_dir():
         steps.append(["proot-distro", "install", system])
-    inner = DISTRO_INSTALL[fam].format(pkgs=DISTRO_PACKAGES[fam][desktop])
+    inner = DISTRO_INSTALL[fam].format(pkgs=DISTRO_PACKAGES[fam][desktop] + " " + AI_EXTRAS[system])
     steps.append(["proot-distro", "login", system, "--", "bash", "-c", inner])
     return steps
 
@@ -148,6 +215,58 @@ def is_installed(system: str, desktop: str) -> bool:
         return bool(shutil.which(SYSTEMS["termux"]["session"][desktop]))
     root = rootfs(system)
     return root.is_dir() and any((root / d / DISTRO_SESSION[desktop]).exists() for d in ("usr/bin", "bin", "usr/local/bin"))
+
+
+def setup_ai(system: str) -> list[str]:
+    """Coloca o comando `ia` e os atalhos do Assistente IA dentro do sistema escolhido."""
+    if system == "termux":
+        prefix = Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"))
+        bin_dir, home = prefix / "bin", Path.home()
+    else:
+        root = rootfs(system)
+        if not root.is_dir():
+            return []
+        bin_dir, home = root / "usr" / "local" / "bin", root / "root"
+    written = []
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    ia = bin_dir / "ia"
+    ia.write_text(IA_SCRIPT, encoding="utf-8")
+    ia.chmod(0o755)
+    written.append(str(ia))
+    # Chaves que o usuário escolheu levar do app (só se existirem), com permissão 600.
+    src = keys_file()
+    if src.is_file() and system != "termux":
+        dst = home / ".config" / "portai" / "ia.env"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+        dst.chmod(0o600)
+        written.append(str(dst))
+    for folder in (home / "Desktop", home / ".local" / "share" / "applications"):
+        folder.mkdir(parents=True, exist_ok=True)
+        for name, text in LAUNCHERS.items():
+            f = folder / name
+            f.write_text(text, encoding="utf-8")
+            f.chmod(0o755)
+            written.append(str(f))
+    return written
+
+
+def ensure_ai_server() -> str:
+    """Sobe a IA offline (llama-server) se houver modelo baixado e ela estiver parada."""
+    try:
+        import portai_llama
+    except ImportError:
+        return "indisponível"
+    if not portai_llama.binary("llama-server"):
+        return "llama.cpp não instalado"
+    st = portai_llama.status()
+    if st.get("running_pid"):
+        return "já rodando"
+    models = portai_llama.local_models()
+    if not models:
+        return "sem modelo baixado (baixe em IA → Offline)"
+    portai_llama.start_server(str(models[0]))
+    return "iniciada com " + models[0].name
 
 
 def _pids(pattern: str) -> list[int]:
@@ -184,9 +303,14 @@ def start(system: str | None = None, desktop: str | None = None, som: bool | Non
         subprocess.run(["pulseaudio", "--start", "--exit-idle-time=-1",
                         "--load=module-native-protocol-tcp auth-ip-acl=127.0.0.1 auth-anonymous=1"],
                        stdout=log, stderr=subprocess.STDOUT, check=False)
+    try:
+        setup_ai(system)
+    except OSError:
+        pass
+    ai = ensure_ai_server()
     proc = subprocess.Popen(["termux-x11", DISPLAY, "-xstartup", startup_command(system, desktop, som)], env=env,
                             stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
-    return {"pid": proc.pid, "system": system, "desktop": desktop, "som": som, "log": str(log_path())}
+    return {"pid": proc.pid, "system": system, "desktop": desktop, "som": som, "ia": ai, "log": str(log_path())}
 
 
 def stop() -> bool:
