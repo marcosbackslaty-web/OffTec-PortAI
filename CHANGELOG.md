@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+- `install.sh`: instalador único para Termux usando o repositório oficial (packages-cf.termux.dev), perfis `--base`/completo, comando `portai` e atalho Termux:Widget.
+- `portai_toolkit.py`: registro único de ferramentas (para que serve, pacote oficial, perfil) usado pelo diagnóstico, instalação e painel.
+- Comandos diretos: `portai doctor [--json]`, `instalar`, `info`, `analisar PASTA`, `relatorios`, `atualizar`.
+- Dados do usuário em `~/PortAI` (relatorios, workspaces, saidas, projetos), separados do código; `PORTAI_HOME` muda o local.
+- Menu 05 reorganizado como "Sistema e configurações": diagnóstico, instalar o que falta, onde fica cada coisa, atualizar, exportar diagnóstico.
+- Painel inicial mostra ferramentas prontas e se o fluxo de APK está completo.
+- IA local com llama.cpp oficial (ggml-org) compilado no aparelho: `portai llama instalar|modelos|iniciar|parar|status|chat|bench|apagar`, servidor em 127.0.0.1 com contexto/threads configuráveis; menu 06 — IA LOCAL.
+- Diagnóstico detecta ferramentas instaladas mas quebradas (ex.: CANNOT LINK EXECUTABLE) e `portai instalar` repara (pkg upgrade + reinstall).
+- Saídas JSON para integração: `portai doctor --json`, `analisar --json`, `relatorios --json`, `projetos`.
+- install.sh: libera `allow-external-apps` para o app PortAI (Android), inclui termux-api e which (necessário ao JADX), corrige saída 141 do `yes |` com pipefail.
+
 ## 0.3.0
 - Universal Translation Engine modular com extração e saída localizada para JSON, XML/Android, TXT, CSV, PO, RESX, properties, INI e YAML.
 - Camada de provedores offline, adaptador por comando e plugin Python sem endpoints ou credenciais embutidos.

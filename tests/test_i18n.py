@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -100,8 +101,9 @@ class InterfaceLocalizationTests(unittest.TestCase):
                 finally:
                     portai.console = previous
                 rendered = stream.getvalue()
-                readable = " ".join(rendered.split())
-                for category in ("01 — PROJETOS", "02 — APK BUILD CENTER", "03 — TRADUÇÃO", "04 — GAME PORTABILITY", "05 — CONFIGURAÇÕES"):
+                # Títulos longos quebram dentro do cartão: ignora as bordas ao comparar o texto.
+                readable = " ".join(re.sub(r"[│╭╮╰╯─]", " ", rendered).split())
+                for category in ("01 — PROJETOS", "02 — APK BUILD CENTER", "03 — TRADUÇÃO", "04 — GAME PORTABILITY", "05 — SISTEMA E CONFIGURAÇÕES"):
                     self.assertIn(" ".join(i18n.translate_text(category, locale).split()), readable)
                 self.assertNotIn("┌", rendered)
 

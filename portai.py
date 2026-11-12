@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import portai_toolkit
 from portai_i18n import (
     LOCALES, LOCALE_NAMES, ask_confirm, ask_prompt, get_locale, save_locale,
     translate_text,
@@ -46,9 +47,12 @@ class LocalizedConsole(Console):
 
 console = LocalizedConsole()
 ROOT = Path(__file__).resolve().parent
-REPORTS = ROOT / "reports"
-WORKSPACES = ROOT / "workspaces"
-VERSION = "0.3.0"
+# Dados do usuário ficam fora do código (que é atualizado via git), numa pasta
+# única e fácil de achar: ~/PortAI (ou $PORTAI_HOME).
+DATA_HOME = portai_toolkit.data_home()
+REPORTS = DATA_HOME / "relatorios"
+WORKSPACES = DATA_HOME / "workspaces"
+VERSION = "0.4.0"
 MAX_FILES = 3000
 MAX_TEXT_BYTES = 1_000_000
 MAX_SCAN_DIRS = 25000
@@ -119,29 +123,116 @@ def section(title: str) -> None:
 def yesno(value: bool) -> str:
     return "[bright_green]OK[/]" if value else "[yellow]NÃO ENCONTRADO[/]"
 
-def check_environment() -> None:
+def show_doctor(report: "portai_toolkit.Report | None" = None) -> "portai_toolkit.Report":
+    """Diagnóstico único: cada ferramenta, para que serve, onde está e como instalar."""
+    report = report or portai_toolkit.collect()
     section("DIAGNÓSTICO DO AMBIENTE")
-    rows = [
-        ("Python", sys.version.split()[0]),
-        ("Arquitetura", os.uname().machine if hasattr(os, "uname") else "desconhecida"),
-        ("Codex CLI", shutil.which("codex") or "não encontrado"),
-        ("Git", shutil.which("git") or "não encontrado"),
-        ("Clang", shutil.which("clang") or "não encontrado"),
-        ("CMake", shutil.which("cmake") or "não encontrado"),
-        ("ANDROID_HOME", os.environ.get("ANDROID_HOME", "(não definido)")),
-        ("SDK em ~/android-sdk", "presente" if (Path.home() / "android-sdk").is_dir() else "não encontrado"),
-    ]
-    for a, b in rows:
-        console.print(f"[white]{a}:[/] [bright_red]{b}[/]")
-    codex = shutil.which("codex")
-    if codex:
-        try:
-            result = subprocess.run([codex, "--version"], capture_output=True, text=True, timeout=10)
-            console.print(f"Codex: [bright_green]{(result.stdout or result.stderr).strip() or 'instalado'}[/]")
-        except Exception as exc:
-            console.print(f"[yellow]Não foi possível consultar o Codex: {exc}[/]")
-        console.print("Autenticação: execute [bold]codex login status[/] para conferir.")
+    env = Table.grid(padding=(0, 2))
+    env.add_column(style="white"); env.add_column(style="bright_red")
+    for key, value in report.environment.items():
+        env.add_row(key, value)
+    env.add_row("Android SDK", report.android_sdk or "não encontrado (só necessário para Gradle/NDK)")
+    console.print(env)
+    table = Table(box=box.ROUNDED, border_style="grey50", header_style="bold bright_red", expand=True)
+    table.add_column("Área", style="dim", no_wrap=True)
+    table.add_column("Ferramenta", style="white", no_wrap=True)
+    table.add_column("Estado", max_width=34)
+    table.add_column("Para que serve / como instalar", ratio=1, min_width=24)
+    for status in report.statuses:
+        tool = status.tool
+        if status.broken:
+            state = "[red]QUEBRADO[/]"
+            detail = f"{tool.purpose}\n[dim]{status.version} — rode: portai instalar (atualiza e reinstala)[/]"
+        elif status.ok:
+            state = f"[bright_green]OK[/] [dim]{status.version[:28]}[/]" if status.version else "[bright_green]OK[/]"
+            detail = tool.purpose
+        else:
+            state = "[red]FALTA[/]" if tool.profile == "base" else "[yellow]opcional[/]"
+            how = f"pkg install {tool.package}" if tool.package else tool.hint
+            detail = f"{tool.purpose}\n[dim]{how}[/]"
+        table.add_row(tool.area, tool.label, state, detail)
+    console.print(table)
+    ready = sum(1 for s in report.statuses if s.ok)
+    console.print(f"[bold]{ready}/{len(report.statuses)}[/] ferramentas prontas.")
+    if report.broken():
+        console.print(f"[red]Instaladas mas quebradas:[/] {', '.join(s.tool.label for s in report.broken())} — [bold]portai instalar[/] repara.")
+    if report.installable():
+        console.print(f"[dim]Para instalar o que falta: [bold]portai instalar[/] ({' '.join(report.installable())})[/]")
+    if any(s.ok and s.tool.key == "codex" for s in report.statuses):
+        console.print("[dim]Codex: confira o login com [bold]codex login status[/].[/]")
     console.print("[dim]A disponibilidade de ferramentas não garante que um projeto possa ser portado.[/]")
+    return report
+
+
+def check_environment() -> None:
+    show_doctor()
+
+
+def install_missing(profile: str = "completo", assume_yes: bool = False) -> int:
+    report = portai_toolkit.collect()  # executa cada ferramenta: detecta as quebradas
+    broken = portai_toolkit.broken_packages(report)
+    if broken:
+        commands = portai_toolkit.repair_commands(broken)
+        console.print(f"[yellow]Ferramentas instaladas mas quebradas: {' '.join(broken)}[/]")
+        for command in commands:
+            console.print(f"Comando: [bold]{' '.join(command)}[/]")
+        if commands and (assume_yes or ask_confirm("Reparar agora (atualizar Termux e reinstalar)?", default=True)):
+            code = portai_toolkit.repair(broken)
+            console.print("[bright_green]Reparo concluído.[/]" if code == 0 else f"[red]Reparo terminou com código {code}.[/]")
+    packages = report.installable(profile)
+    if not packages:
+        if not broken:
+            console.print("[bright_green]Nada para instalar: todas as ferramentas com pacote oficial já estão presentes.[/]")
+        return 0
+    command = portai_toolkit.install_command(packages)
+    if not command:
+        console.print(f"[yellow]Instalação automática só no Termux/apt. Instale manualmente: {' '.join(packages)}[/]")
+        return 1
+    console.print(f"Comando: [bold]{' '.join(command)}[/]")
+    if not assume_yes and not ask_confirm("Instalar agora pelo repositório oficial do Termux?", default=True):
+        return 1
+    code = portai_toolkit.install(packages)
+    console.print("[bright_green]Instalação concluída.[/]" if code == 0 else f"[red]O instalador terminou com código {code}.[/]")
+    return code
+
+
+def show_locations() -> None:
+    """Mostra em um só lugar onde fica cada coisa do PortAI."""
+    section("ONDE FICA CADA COISA")
+    dirs = portai_toolkit.ensure_data_dirs()
+    table = Table(box=box.ROUNDED, border_style="grey50", header_style="bold bright_red")
+    table.add_column("O quê", style="white")
+    table.add_column("Caminho", style="bright_red")
+    table.add_column("Itens", justify="right")
+    rows = [("Código do PortAI", ROOT), *dirs.items(),
+            ("Configurações (idioma)", portai_i18n_config_path())]
+    for label, path in rows:
+        count = len(list(path.iterdir())) if path.is_dir() else ("existe" if path.exists() else "—")
+        table.add_row(label, str(path), str(count))
+    console.print(table)
+    console.print("[dim]Dica: coloque projetos em [bold]~/PortAI/projetos[/] e eles aparecem automaticamente na busca. "
+                  "Mude a pasta de dados com a variável PORTAI_HOME.[/]")
+
+
+def portai_i18n_config_path() -> Path:
+    import portai_i18n
+    return portai_i18n.CONFIG_PATH
+
+
+def update_portai() -> int:
+    console.print("Atualizando o PortAI (git pull + dependências)...")
+    code, output = portai_toolkit.update_repo()
+    if output.strip():
+        console.print(Panel(output.strip()[-4000:], border_style="grey50"))
+    console.print("[bright_green]PortAI atualizado. Reabra para usar a nova versão.[/]" if code == 0 else f"[red]Falha na atualização (código {code}).[/]")
+    return code
+
+
+def export_doctor_json() -> None:
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    path = REPORTS / f"diagnostico-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+    path.write_text(portai_toolkit.report_json(portai_toolkit.collect()) + "\n", encoding="utf-8")
+    console.print(f"Diagnóstico salvo em [bold]{path}[/]")
 
 def iter_project_files(root: Path):
     count = 0
@@ -170,7 +261,7 @@ def scan_roots() -> list[Path]:
         home / "Downloads",
         home / "Documentos",
         home / "PORT",
-        home / "simple-calculator",
+        DATA_HOME / "projetos",
     ]
     # Não varre todos os diretórios de primeiro nível da Home: isso incluía
     # ambientes, caches e ferramentas como se fossem projetos do usuário.
@@ -267,7 +358,7 @@ def discover_projects(search_roots: list[Path] | None = None) -> tuple[list[dict
         root = root.expanduser().resolve()
         for current, dirs, names in os.walk(root, followlinks=False):
             current_path = Path(current)
-            if current_path == ROOT or ROOT in current_path.parents:
+            if any(current_path == own or own in current_path.parents for own in (ROOT, WORKSPACES)):
                 dirs[:] = []
                 continue
             try:
@@ -861,7 +952,7 @@ def translation_menu() -> None:
         engine.translate(result, targets)
         if not _review_translation_proposals(result, engine, targets):
             console.print("[yellow]O provedor não produziu traduções. As strings ficam registradas como não traduzidas; configure um provedor e tente novamente.[/]")
-        output_default = project.parent / f"{project.name}-locales"
+        output_default = DATA_HOME / "saidas" / f"{project.name}-locales"
         output_raw = ask_prompt("Pasta de saída (originais permanecem intactos)", default=str(output_default))
         report = engine.apply(result, project, Path(output_raw), targets)
         _record_translation_report(report)
@@ -1448,7 +1539,7 @@ def _record_translation_report(report: Path) -> None:
 
 
 def _show_help() -> None:
-    console.print(f"OffTec PortAI {VERSION}\nFerramenta local para análise e adaptação de projetos Android.\nRelatórios: {REPORTS}\nWorkspaces persistentes: {WORKSPACES}")
+    console.print(f"OffTec PortAI {VERSION}\nFerramenta local para análise e adaptação de projetos Android.\nRelatórios: {REPORTS}\nWorkspaces persistentes: {WORKSPACES}\n\nComandos rápidos (sem menu):\n  portai doctor        diagnóstico completo\n  portai instalar      instala o que falta\n  portai info          onde fica cada coisa\n  portai analisar DIR  analisa um projeto\n  portai relatorios    histórico\n  portai atualizar     nova versão do PortAI")
 
 
 def _render_menu_cards(
@@ -1495,8 +1586,12 @@ def _category_menu(title: str, actions: tuple[tuple[str, str, Any], ...]) -> Non
             "Planejar adaptação": "Gere um plano de portabilidade baseado nas evidências do projeto.",
             "Reconstruir com Codex": "Continue em workspace isolado com revisão e recuperação.",
             "Idioma da interface": "Escolha o idioma dos menus e mensagens.",
-            "Diagnóstico": "Confira Python, Codex, Git e SDK Android disponíveis.",
+            "Diagnóstico": "Todas as ferramentas, para que servem e como instalar.",
             "Verificar dependências": "Veja quais ferramentas estão instaladas no ambiente.",
+            "Instalar o que falta": "Instala pelo repositório oficial do Termux só o que estiver faltando.",
+            "Onde fica cada coisa": "Relatórios, workspaces, saídas e configurações em um só lugar.",
+            "Atualizar o PortAI": "Baixa a versão mais nova do repositório oficial (git pull).",
+            "Salvar diagnóstico em JSON": "Gera um arquivo com o estado do ambiente para suporte.",
             "Ajuda e informações": "Consulte versão, relatórios e diretórios de trabalho.",
         })
         console.print(f"[bold bright_red]0.[/] {translate_text('Voltar')}")
@@ -1537,21 +1632,29 @@ def game_portability_menu() -> None:
 
 
 def settings_menu() -> None:
-    _category_menu("05 — CONFIGURAÇÕES", (
-        ("1", "Idioma da interface", interface_language_menu),
-        ("2", "Diagnóstico", check_environment),
-        ("3", "Verificar dependências", check_environment),
-        ("4", "Ajuda e informações", _show_help),
+    _category_menu("05 — SISTEMA E CONFIGURAÇÕES", (
+        ("1", "Diagnóstico", check_environment),
+        ("2", "Instalar o que falta", install_missing),
+        ("3", "Onde fica cada coisa", show_locations),
+        ("4", "Atualizar o PortAI", update_portai),
+        ("5", "Salvar diagnóstico em JSON", export_doctor_json),
+        ("6", "Idioma da interface", interface_language_menu),
+        ("7", "Ajuda e informações", _show_help),
     ))
 
 
 def _show_dashboard_status() -> None:
-    codex_ready = shutil.which("codex") is not None
-    sdk_ready = bool(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or (Path.home() / "android-sdk").is_dir())
+    report = portai_toolkit.collect(with_versions=False)
+    by_key = {s.tool.key: s.ok for s in report.statuses}
+    apk_ready = all(by_key.get(k) for k in ("java", "apktool", "apksigner"))
+    ready = sum(by_key.values())
+    total = len(by_key)
+    codex_ready = by_key.get("codex", False)
     items = [
         f"[bold]RUNTIME[/]  [green]Python {sys.version_info.major}.{sys.version_info.minor}[/]",
+        f"[bold]FERRAMENTAS[/]  [{'green' if ready == total else 'yellow'}]{ready}/{total}[/]",
+        f"[bold]APK[/]  [{'green' if apk_ready else 'yellow'}]{'Pronto' if apk_ready else 'portai instalar'}[/]",
         f"[bold]CODEX CLI[/]  [{'green' if codex_ready else 'yellow'}]{'Pronto' if codex_ready else 'Opcional'}[/]",
-        f"[bold]ANDROID SDK[/]  [{'green' if sdk_ready else 'yellow'}]{'Detectado' if sdk_ready else 'Sob demanda'}[/]",
     ]
     columns = 3 if console.width >= 105 else 2 if console.width >= 76 else 1
     status = Table.grid(expand=True, padding=(0, 2))
@@ -1580,7 +1683,8 @@ def menu() -> None:
             ("2", "02 — APK BUILD CENTER", apk_build_center_menu),
             ("3", "03 — TRADUÇÃO", translation_category_menu),
             ("4", "04 — GAME PORTABILITY", game_portability_menu),
-            ("5", "05 — CONFIGURAÇÕES", settings_menu),
+            ("5", "05 — SISTEMA E CONFIGURAÇÕES", settings_menu),
+            ("6", "06 — IA LOCAL", local_ai_menu),
         )
         console.print("\n[bold white]ÁREAS DE TRABALHO[/]")
         _render_menu_cards(categories, {
@@ -1588,7 +1692,8 @@ def menu() -> None:
             "02 — APK BUILD CENTER": "Compile, inspecione, assine e valide pacotes Android.",
             "03 — TRADUÇÃO": "Localize conteúdo de projetos e recursos de APKs.",
             "04 — GAME PORTABILITY": "Analise engines e planeje a jornada do jogo até o Android.",
-            "05 — CONFIGURAÇÕES": "Idioma, diagnóstico e informações da ferramenta.",
+            "05 — SISTEMA E CONFIGURAÇÕES": "Diagnóstico, instalar o que falta, pastas, atualização e idioma.",
+            "06 — IA LOCAL": "llama.cpp no próprio aparelho: chat e servidor offline.",
         })
         console.print("[bold bright_red]0.[/] Sair")
         choice = ask_prompt("PortAI", choices=[number for number, _name, _action in categories] + ["0"], default="1")
@@ -1597,9 +1702,198 @@ def menu() -> None:
             break
         next(action for number, _name, action in categories if number == choice)()
 
+def _analyze_cli(path: str) -> int:
+    try:
+        report = analyze_project(Path(path))
+        md, js = save_report(report)
+        show_report(report, md, js)
+        return 0
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]Falha na análise: {exc}[/]")
+        return 1
+
+
+def build_parser():
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="portai",
+        description="OffTec PortAI — tudo em um comando. Sem argumentos, abre o menu.",
+    )
+    parser.add_argument("--version", action="version", version=f"OffTec PortAI {VERSION}")
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("menu", help="abre o menu interativo (padrão)")
+    doctor = sub.add_parser("doctor", aliases=["diagnostico"], help="mostra o que está instalado e o que falta")
+    doctor.add_argument("--json", action="store_true", help="saída em JSON")
+    inst = sub.add_parser("instalar", aliases=["install"], help="instala o que falta pelo repositório oficial do Termux")
+    inst.add_argument("--base", action="store_true", help="só o essencial")
+    inst.add_argument("-y", "--sim", action="store_true", help="não perguntar")
+    sub.add_parser("info", aliases=["pastas"], help="onde ficam relatórios, workspaces e configurações")
+    sub.add_parser("atualizar", aliases=["update"], help="atualiza o PortAI (git pull + dependências)")
+    ana = sub.add_parser("analisar", aliases=["analyze"], help="analisa um projeto sem passar pelo menu")
+    ana.add_argument("pasta")
+    ana.add_argument("--json", action="store_true", help="imprime o relatório em JSON")
+    rel = sub.add_parser("relatorios", aliases=["reports"], help="lista workspaces e relatórios recentes")
+    rel.add_argument("--json", action="store_true", help="lista em JSON")
+    sub.add_parser("projetos", help="lista projetos encontrados nas pastas monitoradas (JSON)")
+    llama = sub.add_parser("llama", aliases=["ia"], help="IA local com llama.cpp (compilar, modelos, chat, servidor)")
+    lsub = llama.add_subparsers(dest="llama_cmd")
+    lsub.add_parser("instalar", help="baixa/atualiza ggml-org/llama.cpp e compila no aparelho")
+    lsub.add_parser("modelos", help="lista modelos GGUF e sugestões")
+    ini = lsub.add_parser("iniciar", help="sobe o servidor em segundo plano (log em ~/PortAI/llama-server.log)")
+    ini.add_argument("modelo", nargs="?")
+    ini.add_argument("--porta", type=int, default=8080)
+    ini.add_argument("--ctx", type=int, default=8192, help="tamanho do contexto em tokens")
+    ini.add_argument("--threads", type=int, default=None, help="núcleos de CPU (padrão: automático)")
+    rm = lsub.add_parser("apagar", help="apaga um modelo .gguf de ~/PortAI/modelos")
+    rm.add_argument("modelo")
+    lsub.add_parser("parar", help="encerra o servidor em segundo plano")
+    lsub.add_parser("status", help="estado da IA local em JSON")
+    for name, text in (("chat", "conversa no terminal"), ("servidor", "API compatível com OpenAI em 127.0.0.1"), ("bench", "mede a velocidade")):
+        p = lsub.add_parser(name, help=text)
+        p.add_argument("modelo", nargs="?", help="arquivo .gguf ou repositório do Hugging Face (usuario/repo[:quant])")
+        if name == "servidor":
+            p.add_argument("--porta", type=int, default=8080)
+    return parser
+
+
+def _pick_model(given: str | None) -> str | None:
+    import portai_llama
+    if given:
+        return given
+    models = portai_llama.local_models()
+    if models:
+        return str(models[0])
+    return portai_llama.SUGGESTED_MODELS[0][0]
+
+
+def show_models() -> None:
+    import portai_llama
+    section("MODELOS DE IA LOCAL")
+    models = portai_llama.local_models()
+    if models:
+        for path in models:
+            console.print(f"• {path.name}  [dim]{path.stat().st_size / 1e9:.2f} GB — {path}[/]")
+    else:
+        console.print("[yellow]Nenhum modelo baixado ainda.[/]")
+    console.print("\nSugestões (baixam sozinhas no primeiro uso, ficam em ~/PortAI/modelos):")
+    for repo, text in portai_llama.SUGGESTED_MODELS:
+        console.print(f"  [bold]{repo}[/]  [dim]{text}[/]")
+    console.print("[dim]Exemplo: portai llama chat ggml-org/gemma-3-1b-it-GGUF[/]")
+
+
+def llama_cli(cmd: str | None, model: str | None = None, port: int = 8080, ctx: int = 8192, threads: int | None = None) -> int:
+    import portai_llama
+    if cmd in (None, "modelos"):
+        show_models()
+        return 0
+    if cmd == "status":
+        print(json.dumps(portai_llama.status(), ensure_ascii=False))
+        return 0
+    if cmd == "apagar":
+        ok = portai_llama.delete_model(model or "")
+        console.print("Modelo apagado." if ok else "Modelo não encontrado em ~/PortAI/modelos.")
+        return 0 if ok else 1
+    if cmd == "parar":
+        stopped = portai_llama.stop_server()
+        console.print("Servidor encerrado." if stopped else "Nenhum servidor em execução.")
+        return 0
+    if cmd == "iniciar":
+        if not portai_llama.binary("llama-server"):
+            console.print("[yellow]llama.cpp ainda não foi compilado. Rode: portai llama instalar[/]")
+            return 1
+        pid = portai_llama.start_server(_pick_model(model), port, ctx, threads)
+        console.print(f"Servidor iniciado (pid {pid}) em http://127.0.0.1:{port} — log: {portai_llama.server_log()}")
+        return 0
+    if cmd == "instalar":
+        missing = [t for t in ("git", "cmake", "clang") if not shutil.which(t)]
+        if missing:
+            console.print(f"[red]Faltam: {' '.join(missing)} — rode portai instalar.[/]")
+            return 1
+        return portai_llama.build(echo=lambda line: console.print(f"[dim]{line}[/]"))
+    if not portai_llama.binary("llama-cli"):
+        console.print("[yellow]llama.cpp ainda não foi compilado. Rode: portai llama instalar[/]")
+        return 1
+    model = _pick_model(model)
+    if cmd == "chat":
+        command = portai_llama.chat_command(model)
+    elif cmd == "servidor":
+        command = portai_llama.server_command(model, port)
+        console.print(f"Servidor em [bold]http://127.0.0.1:{port}[/] (interface web e API /v1/chat/completions). Ctrl+C para parar.")
+    else:
+        command = portai_llama.bench_command(model)
+    console.print(f"[dim]$ {' '.join(command)}[/]")
+    return subprocess.run(command, env=portai_llama.llama_env(), check=False).returncode
+
+
+def local_ai_menu() -> None:
+    def ask_model() -> str | None:
+        return ask_prompt("Modelo (.gguf ou usuario/repo do Hugging Face)", default=_pick_model(None) or "") or None
+    _category_menu("06 — IA LOCAL", (
+        ("1", "Instalar/atualizar llama.cpp", lambda: llama_cli("instalar")),
+        ("2", "Modelos", lambda: llama_cli("modelos")),
+        ("3", "Conversar no terminal", lambda: llama_cli("chat", ask_model())),
+        ("4", "Servidor de IA (API OpenAI)", lambda: llama_cli("servidor", ask_model())),
+        ("5", "Medir velocidade", lambda: llama_cli("bench", ask_model())),
+    ))
+
+
+def run_cli(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    command = args.command
+    if command in (None, "menu"):
+        menu()
+        return 0
+    if command in ("doctor", "diagnostico"):
+        if args.json:
+            print(portai_toolkit.report_json(portai_toolkit.collect()))
+            return 0
+        report = show_doctor()
+        return 1 if report.missing("base") else 0
+    if command in ("instalar", "install"):
+        return install_missing("base" if args.base else "completo", assume_yes=args.sim)
+    if command in ("info", "pastas"):
+        show_locations()
+        return 0
+    if command in ("atualizar", "update"):
+        return update_portai()
+    if command in ("analisar", "analyze"):
+        if args.json:
+            try:
+                report = analyze_project(Path(args.pasta))
+                md, js = save_report(report)
+                report["report_files"] = {"markdown": str(md), "json": str(js)}
+                print(json.dumps(report, ensure_ascii=False, default=str))
+                return 0
+            except (OSError, ValueError) as exc:
+                print(json.dumps({"error": str(exc)}, ensure_ascii=False))
+                return 1
+        return _analyze_cli(args.pasta)
+    if command in ("relatorios", "reports"):
+        if args.json:
+            REPORTS.mkdir(parents=True, exist_ok=True)
+            items = sorted((p for p in REPORTS.glob("*.json") if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)[:50]
+            print(json.dumps([{"name": p.name, "path": str(p), "size": p.stat().st_size,
+                               "mtime": int(p.stat().st_mtime)} for p in items], ensure_ascii=False))
+            return 0
+        _show_project_reports()
+        return 0
+    if command == "projetos":
+        projects, executables = discover_projects()
+        print(json.dumps({"roots": [str(r) for r in scan_roots()],
+                          "projects": [{k: str(v) for k, v in p.items()} for p in projects],
+                          "executables": [str(e) for e in executables]}, ensure_ascii=False))
+        return 0
+    if command in ("llama", "ia"):
+        return llama_cli(getattr(args, "llama_cmd", None), getattr(args, "modelo", None), getattr(args, "porta", 8080),
+                         getattr(args, "ctx", 8192), getattr(args, "threads", None))
+    return 2
+
+
 def main() -> None:
     try:
-        menu()
+        code = run_cli(sys.argv[1:])
+        if code:
+            raise SystemExit(code)
     except (KeyboardInterrupt, EOFError):
         console.print("\n[yellow]Operação interrompida pelo usuário.[/]")
     except Exception as exc:

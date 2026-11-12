@@ -6,6 +6,8 @@
 
 <p align="center"><strong>Do projeto ao bolso.</strong><br>Analise projetos e explore caminhos para levá-los ao Android com as ferramentas do Termux.</p>
 
+> Fork de [Mcsd7/OffTec-PortAI](https://github.com/Mcsd7/OffTec-PortAI) com instalador único, diagnóstico, IA local (llama.cpp) e integração com o app Android **PortAI**.
+
 ---
 
 **OffTec PortAI** é um assistente experimental para analisar projetos Windows e apoiar sua adaptação para Android no Termux. Ele identifica tecnologias e dependências que podem exigir ajustes, gera relatórios e, opcionalmente, usa o Codex CLI para trabalhar em uma cópia isolada do projeto.
@@ -39,32 +41,56 @@
 
 - Python 3.10 ou superior.
 - Termux em dispositivo ARM64 (ambiente recomendado).
-- `rich`, instalado pelo arquivo `requirements.txt`.
+- `rich`, instalado pelo `install.sh` (ou `requirements.txt`).
 - Codex CLI autenticado para os recursos de assistência com Codex.
 - Java, Android SDK e Gradle compatíveis com o projeto para compilar APKs.
 
 ## Instalação
 
-No Termux:
+Um único comando no Termux instala tudo pelo **repositório oficial do Termux** (`packages-cf.termux.dev`) e deixa o comando `portai` pronto:
 
 ```bash
-pkg update
-pkg install python git
-git clone https://github.com/Mcsd7/OffTec-PortAI.git
-cd OffTec-PortAI
-python -m pip install -r requirements.txt
-python portai.py
+pkg install -y git && git clone https://github.com/marcosbackslaty-web/OffTec-PortAI.git && bash OffTec-PortAI/install.sh
 ```
 
-Se o ambiente bloquear a instalação global de pacotes, use um ambiente virtual:
+- `bash install.sh` instala o perfil **completo**: Python, Git, OpenJDK 21, Apktool, apksigner, aapt/aapt2/zipalign, JADX, Gradle, CMake, Ninja, Clang, ADB e Codex CLI.
+- `bash install.sh --base` instala só o essencial para abrir o PortAI.
+- Pode rodar de novo quando quiser: só instala o que falta.
+- Cria o atalho **PortAI** para o widget do Termux:Widget.
+
+### Tudo em um comando
+
+| Comando | O que faz |
+|---|---|
+| `portai` | abre o menu |
+| `portai doctor` | cada ferramenta: instalada ou não, para que serve e como instalar |
+| `portai doctor --json` | o mesmo diagnóstico em JSON |
+| `portai instalar` | instala o que falta (`--base` só o essencial, `-y` sem perguntar) |
+| `portai info` | onde ficam relatórios, workspaces, saídas e configurações |
+| `portai analisar PASTA` | analisa um projeto direto, sem menu |
+| `portai relatorios` | workspaces e relatórios recentes |
+| `portai atualizar` | `git pull` + dependências Python |
+
+### Onde fica cada coisa
+
+Os dados ficam separados do código, em uma pasta só: `~/PortAI` (mude com `PORTAI_HOME`).
+
+```
+~/PortAI/
+  projetos/     coloque aqui seus projetos — aparecem na busca automática
+  relatorios/   relatórios Markdown/JSON e históricos
+  workspaces/   cópias isoladas usadas pelo Codex e pelo APK Build Center
+  saidas/       traduções geradas (destino padrão) e APKs que você queira guardar
+```
+
+### Instalação manual (fora do Termux)
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python portai.py
+python portai.py doctor
 ```
-
 ## Integração com Codex
 
 Instale e autentique o Codex CLI antes de usar esse recurso:
@@ -122,12 +148,14 @@ Abra **Configurações** no menu principal para escolher Português brasileiro, 
 
 ## Estrutura do projeto
 
-- `portai.py`: aplicativo de terminal.
+- `portai.py`: aplicativo de terminal e comandos `portai ...`.
+- `portai_toolkit.py`: registro único de ferramentas, diagnóstico, instalação e pastas.
+- `install.sh`: instalador único para Termux (repositório oficial).
 - `game_portability.py`: análise heurística e relatórios de portabilidade de jogos.
 - `samples/demo_windows/`: exemplo didático de projeto Windows.
 - `tests/`: testes automatizados.
-- `reports/`: destino dos relatórios gerados.
-- `workspaces/`: cópias de trabalho criadas durante o uso do Codex.
+- `~/PortAI/relatorios`: destino dos relatórios gerados.
+- `~/PortAI/workspaces`: cópias de trabalho criadas durante o uso do Codex.
 
 ## Licença
 
