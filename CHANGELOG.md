@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.4.0
+- Desktop Linux na tela com Termux:X11: `portai desktop instalar|iniciar|parar|status` — sistemas Termux nativo, Ubuntu, Debian, Fedora e Arch (proot-distro) com XFCE, LXQt ou Openbox, som via PulseAudio.
 - `install.sh`: instalador único para Termux usando o repositório oficial (packages-cf.termux.dev), perfis `--base`/completo, comando `portai` e atalho Termux:Widget.
 - `portai_toolkit.py`: registro único de ferramentas (para que serve, pacote oficial, perfil) usado pelo diagnóstico, instalação e painel.
 - Comandos diretos: `portai doctor [--json]`, `instalar`, `info`, `analisar PASTA`, `relatorios`, `atualizar`.

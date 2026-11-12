@@ -1753,7 +1753,45 @@ def build_parser():
         p.add_argument("modelo", nargs="?", help="arquivo .gguf ou repositório do Hugging Face (usuario/repo[:quant])")
         if name == "servidor":
             p.add_argument("--porta", type=int, default=8080)
+    desk = sub.add_parser("desktop", help="desktop Linux na tela com Termux:X11 (Ubuntu, Debian, Fedora, Arch ou Termux)")
+    dsub = desk.add_subparsers(dest="desk_cmd")
+    di = dsub.add_parser("instalar", help="instala o sistema e o ambiente escolhidos")
+    di.add_argument("sistema", nargs="?", default=None, help="termux, ubuntu, debian, fedora ou archlinux")
+    di.add_argument("ambiente", nargs="?", default=None, help="xfce, lxqt ou openbox")
+    ds = dsub.add_parser("iniciar", help="abre o desktop (depois abra o app Termux:X11)")
+    ds.add_argument("sistema", nargs="?", default=None)
+    ds.add_argument("ambiente", nargs="?", default=None)
+    ds.add_argument("--sem-som", action="store_true")
+    dsub.add_parser("parar", help="fecha o desktop")
+    dsub.add_parser("status", help="estado em JSON")
     return parser
+
+
+def desktop_cli(args) -> int:
+    import portai_desktop as pd
+    cmd = getattr(args, "desk_cmd", None)
+    if cmd in (None, "status"):
+        print(json.dumps(pd.status(), ensure_ascii=False))
+        return 0
+    if cmd == "parar":
+        console.print("Desktop fechado." if pd.stop() else "Nenhum desktop aberto.")
+        return 0
+    cfg = pd.load_config()
+    system = args.sistema or cfg.get("system", "ubuntu")
+    desktop = args.ambiente or cfg.get("desktop", "xfce")
+    try:
+        if cmd == "instalar":
+            console.print(f"Instalando [bold]{pd.SYSTEMS[system]['label'] if system in pd.SYSTEMS else system}[/] com "
+                          f"[bold]{pd.DESKTOPS[desktop]['label'] if desktop in pd.DESKTOPS else desktop}[/]…")
+            code = pd.install(system, desktop, echo=lambda line: console.print(f"[dim]{line}[/]"))
+            console.print("[bright_green]Pronto! Toque em ▶ Abrir desktop no app PortAI.[/]" if code == 0 else f"[red]Falhou (código {code}).[/]")
+            return code
+        info = pd.start(system, desktop, som=not args.sem_som)
+        console.print(f"Desktop iniciando: {info['system']} + {info['desktop']} (pid {info['pid']}). Abra o app Termux:X11.")
+        return 0
+    except (ValueError, RuntimeError) as exc:
+        console.print(f"[red]{exc}[/]")
+        return 1
 
 
 def _pick_model(given: str | None) -> str | None:
@@ -1883,6 +1921,8 @@ def run_cli(argv: list[str] | None = None) -> int:
                           "projects": [{k: str(v) for k, v in p.items()} for p in projects],
                           "executables": [str(e) for e in executables]}, ensure_ascii=False))
         return 0
+    if command == "desktop":
+        return desktop_cli(args)
     if command in ("llama", "ia"):
         return llama_cli(getattr(args, "llama_cmd", None), getattr(args, "modelo", None), getattr(args, "porta", 8080),
                          getattr(args, "ctx", 8192), getattr(args, "threads", None))
