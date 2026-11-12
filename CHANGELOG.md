@@ -10,7 +10,7 @@
 - IA local com llama.cpp oficial (ggml-org) compilado no aparelho: `portai llama instalar|modelos|iniciar|parar|status|chat|bench|apagar`, servidor em 127.0.0.1 com contexto/threads configuráveis; menu 06 — IA LOCAL.
 - Diagnóstico detecta ferramentas instaladas mas quebradas (ex.: CANNOT LINK EXECUTABLE) e `portai instalar` repara (pkg upgrade + reinstall).
 - Saídas JSON para integração: `portai doctor --json`, `analisar --json`, `relatorios --json`, `projetos`.
-- install.sh: libera `allow-external-apps` para o app PortAI (Android), inclui termux-api e which (necessário ao JADX), corrige saída 141 do `yes |` com pipefail.
+- install.sh: libera `allow-external-apps` para o app PortAI (Android), inclui which (necessário ao JADX); recursos do aparelho (bateria, Wi-Fi, lanterna, voz, câmera…) ficam no próprio app, sem Termux:API, corrige saída 141 do `yes |` com pipefail.
 
 ## 0.3.0
 - Universal Translation Engine modular com extração e saída localizada para JSON, XML/Android, TXT, CSV, PO, RESX, properties, INI e YAML.

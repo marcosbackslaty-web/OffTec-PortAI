@@ -80,8 +80,6 @@ TOOLS: tuple[Tool, ...] = (
     Tool("godot", "Godot", ("godot", "godot4"), None, "Jogos", "Exporta projetos Godot para Android.",
          hint="Instale o Godot e os templates de exportação Android."),
     Tool("which", "which", ("which",), "which", "Base", "Usado por scripts como o do JADX para achar o Java.", "completo", version_args=()),
-    Tool("termux-api", "Termux:API", ("termux-battery-status",), "termux-api", "Dispositivo",
-         "Bateria, Wi-Fi, lanterna, voz, notificações, câmera e sensores (precisa do app Termux:API).", version_args=()),
     Tool("termux-open", "termux-tools", ("termux-open",), "termux-tools", "Dispositivo", "Abre APKs/relatórios em outros apps.", version_args=()),
 )
 

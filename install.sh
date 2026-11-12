@@ -28,7 +28,7 @@ for arg in "$@"; do
 done
 
 BASE_PKGS=(python git)
-FULL_PKGS=(openjdk-21 apktool apksigner aapt aapt2 jadx gradle cmake ninja clang android-tools codex termux-tools termux-api which)
+FULL_PKGS=(openjdk-21 apktool apksigner aapt aapt2 jadx gradle cmake ninja clang android-tools codex termux-tools which)
 
 say()  { printf '\033[1;31m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[aviso]\033[0m %s\n' "$*"; }
