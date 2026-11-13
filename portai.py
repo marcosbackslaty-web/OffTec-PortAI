@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_HOME = portai_toolkit.data_home()
 REPORTS = DATA_HOME / "relatorios"
 WORKSPACES = DATA_HOME / "workspaces"
-VERSION = "0.5.4"
+VERSION = "0.6.0"
 MAX_FILES = 3000
 MAX_TEXT_BYTES = 1_000_000
 MAX_SCAN_DIRS = 25000
@@ -1794,6 +1794,25 @@ def build_parser():
     dp.add_argument("--json", action="store_true")
     dsub.add_parser("parar", help="fecha o desktop")
     dsub.add_parser("status", help="estado em JSON")
+    ap = sub.add_parser("adb", help="aparelhos via adb: parear por Wi-Fi, instalar APK, enviar arquivos, print, apps")
+    asub = ap.add_subparsers(dest="adb_cmd")
+    asub.add_parser("dispositivos", help="lista aparelhos conectados (JSON)")
+    a1 = asub.add_parser("parear", help="pareia com o código da 'Depuração sem fio' do outro aparelho")
+    a1.add_argument("ip"); a1.add_argument("porta"); a1.add_argument("codigo")
+    a2 = asub.add_parser("conectar", help="conecta pela porta de conexão da 'Depuração sem fio'")
+    a2.add_argument("ip"); a2.add_argument("porta")
+    for name, hlp in (("desconectar", "desconecta"), ("info", "modelo, Android, bateria, espaço (JSON)"),
+                      ("print", "tira print da tela e salva em Download/PortAI-prints"),
+                      ("apps", "apps instalados (JSON)")):
+        x = asub.add_parser(name, help=hlp)
+        x.add_argument("serial")
+    a3 = asub.add_parser("instalar", help="instala um APK no aparelho")
+    a3.add_argument("serial"); a3.add_argument("apk")
+    a4 = asub.add_parser("enviar", help="envia arquivo para /sdcard/Download do aparelho")
+    a4.add_argument("serial"); a4.add_argument("arquivo")
+    a5 = asub.add_parser("desinstalar", help="remove um app do aparelho")
+    a5.add_argument("serial"); a5.add_argument("pacote")
+    asub.add_parser("apks", help="APKs prontos para instalar (JSON)")
     vmp = sub.add_parser("vm", help="roda sistemas (ISO/IMG/QCOW2…) que estão no aparelho, com QEMU na tela do Termux:X11")
     vsub = vmp.add_subparsers(dest="vm_cmd")
     vsub.add_parser("procurar", help="lista arquivos de sistema encontrados no aparelho (JSON)")
@@ -1813,6 +1832,42 @@ def build_parser():
     vsub.add_parser("parar", help="desliga a máquina virtual")
     vsub.add_parser("status", help="estado em JSON")
     return parser
+
+
+def adb_cli(args) -> int:
+    """portai adb …: sempre responde JSON ({ok, ...} ou {ok: false, erro})."""
+    import portai_adb as pa
+    cmd = getattr(args, "adb_cmd", None) or "dispositivos"
+    try:
+        if cmd != "apks":
+            pa.ensure_adb()
+        if cmd == "dispositivos":
+            data = {"dispositivos": pa.devices()}
+        elif cmd == "parear":
+            data = {"msg": pa.pair(args.ip, args.porta, args.codigo)}
+        elif cmd == "conectar":
+            data = {"serial": pa.connect(args.ip, args.porta)}
+        elif cmd == "desconectar":
+            data = {"msg": pa.disconnect(args.serial)}
+        elif cmd == "info":
+            data = {"info": pa.info(args.serial)}
+        elif cmd == "print":
+            data = {"arquivo": pa.screenshot(args.serial)}
+        elif cmd == "apps":
+            data = {"apps": pa.packages(args.serial)}
+        elif cmd == "instalar":
+            data = {"msg": pa.install(args.serial, args.apk)}
+        elif cmd == "enviar":
+            data = {"destino": pa.push(args.serial, args.arquivo)}
+        elif cmd == "desinstalar":
+            data = {"msg": pa.uninstall(args.serial, args.pacote)}
+        else:
+            data = {"apks": pa.apks()}
+    except (pa.AdbError, OSError, subprocess.SubprocessError) as exc:
+        print(json.dumps({"ok": False, "erro": str(exc)}, ensure_ascii=False))
+        return 1
+    print(json.dumps({"ok": True, **data}, ensure_ascii=False))
+    return 0
 
 
 def vm_cli(args) -> int:
@@ -2105,6 +2160,8 @@ def run_cli(argv: list[str] | None = None) -> int:
         return desktop_cli(args)
     if command == "vm":
         return vm_cli(args)
+    if command == "adb":
+        return adb_cli(args)
     if command in ("llama", "ia"):
         return llama_cli(getattr(args, "llama_cmd", None), getattr(args, "modelo", None), getattr(args, "porta", 8080),
                          getattr(args, "ctx", 8192), getattr(args, "threads", None))

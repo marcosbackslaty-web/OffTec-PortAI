@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.0
+- `portai adb` — aparelhos via adb sem PC: `dispositivos`, `parear IP PORTA CODIGO`, `conectar IP PORTA`, `desconectar`, `info`, `instalar SERIAL APK`, `enviar SERIAL ARQUIVO` (para /sdcard/Download), `print` (salva em Download/PortAI-prints), `apps`, `desinstalar`, `apks`. Sempre responde JSON; entradas validadas (IP, porta, código, serial, pacote).
+
 ## 0.5.4
 - Compatível com o proot-distro 5.x, que guarda os sistemas em `containers/<nome>/rootfs` (antes `installed-rootfs/<nome>`): sem isso o desktop instalado aparecia como "não instalado" e os scripts (`ia`, `android`, aparência, pasta Tablet) não eram colocados.
 
