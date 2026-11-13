@@ -77,7 +77,9 @@ def parse_devices(out: str) -> list[dict]:
 
 
 def devices() -> list[dict]:
-    return parse_devices(_run(["devices", "-l"], timeout=20).stdout)
+    # "emulator-5554 offline" fantasma: o adb vê outro app (ex.: ADB App Manager) na porta 5555.
+    return [d for d in parse_devices(_run(["devices", "-l"], timeout=20).stdout)
+            if not (d["serial"].startswith("emulator-") and d["state"] == "offline")]
 
 
 def pair(host: str, port: str | int, code: str) -> str:
@@ -129,7 +131,7 @@ def apks(roots: list[Path] | None = None, max_depth: int = 3) -> list[dict]:
                 dirs[:] = []
             dirs[:] = [d for d in dirs if not d.startswith(".")]
             for f in files:
-                if f.lower().endswith((".apk", ".apks")):
+                if f.lower().endswith((".apk", ".apks", ".xapk", ".apkm")):
                     p = Path(cur) / f
                     try:
                         st, real = p.stat(), str(p.resolve())
@@ -140,10 +142,37 @@ def apks(roots: list[Path] | None = None, max_depth: int = 3) -> list[dict]:
 
 
 def install(serial: str, apk: str) -> str:
+    """Instala .apk (normal) ou .apks/.xapk/.apkm (pacote dividido, via install-multiple)."""
     p = Path(apk)
-    if not p.is_file() or p.suffix.lower() != ".apk":
+    ext = p.suffix.lower()
+    if not p.is_file() or ext not in (".apk", ".apks", ".xapk", ".apkm"):
         raise AdbError(f"APK não encontrado: {apk}")
+    if ext != ".apk":
+        return _install_split(serial, p)
     r = _run(["install", "-r", str(p)], timeout=600, serial=serial)
+    text = (r.stdout + r.stderr).strip()
+    if "Success" not in text:
+        raise AdbError(text[-800:] or "Instalação falhou.")
+    return text
+
+
+def _install_split(serial: str, bundle: Path) -> str:
+    import tempfile
+    import zipfile
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            with zipfile.ZipFile(bundle) as z:
+                names = [n for n in z.namelist() if n.lower().endswith(".apk") and "/" not in n.strip("/")]
+                if not names:
+                    raise AdbError("Nenhum APK dentro do pacote.")
+                parts = []
+                for n in names:  # extrai só os .apk da raiz, com nome seguro
+                    dst = Path(tmp) / Path(n).name
+                    dst.write_bytes(z.read(n))
+                    parts.append(str(dst))
+        except zipfile.BadZipFile as exc:
+            raise AdbError("Arquivo .apks inválido.") from exc
+        r = _run(["install-multiple", "-r", *sorted(parts)], timeout=900, serial=serial)
     text = (r.stdout + r.stderr).strip()
     if "Success" not in text:
         raise AdbError(text[-800:] or "Instalação falhou.")

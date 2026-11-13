@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+- `portai adb instalar` aceita pacotes divididos `.apks`/`.xapk`/`.apkm` (via `adb install-multiple`).
+- Esconde o "emulator-5554 offline" fantasma (outro app usando a porta 5555), visto no teste real no tablet.
+
 ## 0.6.0
 - `portai adb` — aparelhos via adb sem PC: `dispositivos`, `parear IP PORTA CODIGO`, `conectar IP PORTA`, `desconectar`, `info`, `instalar SERIAL APK`, `enviar SERIAL ARQUIVO` (para /sdcard/Download), `print` (salva em Download/PortAI-prints), `apps`, `desinstalar`, `apks`. Sempre responde JSON; entradas validadas (IP, porta, código, serial, pacote).
 

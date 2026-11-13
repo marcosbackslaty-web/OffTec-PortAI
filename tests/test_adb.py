@@ -15,10 +15,10 @@ FAKE_ADB = r"""#!/bin/sh
 # adb falso para testes: responde conforme o subcomando
 [ "$1" = "-s" ] && shift 2
 case "$1" in
-  devices) printf 'List of devices attached\nZY22ABC   device usb:1-1 product:rtwo model:moto_X40 device:rtwo transport_id:1\n192.168.0.20:41234 device product:gts11 model:SM_X736B device:gts11 transport_id:2\nEMU1 unauthorized usb:1-2 transport_id:3\n' ;;
+  devices) printf 'List of devices attached\nemulator-5554 offline transport_id:9\nZY22ABC  device usb:1-1 product:rtwo model:moto_X40 device:rtwo transport_id:1\n192.168.0.20:41234 device product:gts11 model:SM_X736B device:gts11 transport_id:2\nEMU1 unauthorized usb:1-2 transport_id:3\n' ;;
   pair) [ "$3" = "123456" ] && echo "Successfully paired to $2 [guid=adb-x]" || echo "Failed: Wrong password or connection was dropped." ;;
   connect) echo "connected to $2" ;;
-  install) echo "Performing Streamed Install"; echo "Success" ;;
+  install|install-multiple) echo "Performing Streamed Install ($#)"; echo "Success" ;;
   push) echo "1 file pushed" ;;
   uninstall) echo "Success" ;;
   shell) case "$2" in
@@ -70,6 +70,13 @@ class AdbTests(unittest.TestCase):
         apk = Path(self.tmp.name) / "app.apk"
         apk.write_bytes(b"PK")
         self.assertIn("Success", pa.install("ZY22ABC", str(apk)))
+        import zipfile
+        bundle = Path(self.tmp.name) / "app.apks"
+        with zipfile.ZipFile(bundle, "w") as z:
+            z.writestr("base.apk", b"PK")
+            z.writestr("split_config.arm64_v8a.apk", b"PK")
+            z.writestr("toc.pb", b"x")
+        self.assertIn("(4)", pa.install("ZY22ABC", str(bundle)))  # install-multiple -r + 2 partes
         with self.assertRaises(pa.AdbError):
             pa.install("ZY22ABC", "/nao/existe.apk")
         with self.assertRaises(pa.AdbError):
