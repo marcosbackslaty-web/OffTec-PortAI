@@ -38,8 +38,8 @@ class DesktopTests(unittest.TestCase):
         self.assertNotIn("proot-distro install debian", flat)
 
     def test_families(self):
-        self.assertIn("dnf install", " ".join(pd.install_commands("fedora", "xfce")[-1]))
-        self.assertIn("pacman -Syu", " ".join(pd.install_commands("archlinux", "openbox")[-1]))
+        self.assertIn("dnf install", " ".join(pd.install_commands("fedora", "xfce")[-2]))
+        self.assertIn("pacman -Syu", " ".join(pd.install_commands("archlinux", "openbox")[-2]))
 
     def test_startup_command(self):
         self.assertIn("proot-distro login ubuntu --shared-tmp", pd.startup_command("ubuntu", "xfce", True))

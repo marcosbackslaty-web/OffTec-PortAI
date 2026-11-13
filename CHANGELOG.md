@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+- Desktop entra como usuário comum `portai` (sudo sem senha); `--root` volta ao antigo. Ajustes para navegadores/Electron no proot (sem sandbox) e helper do dbus com setuid.
+- `portai desktop limitador`: desliga o limitador de processos do Android 12+ (o que fecha o desktop sozinho) pelo adb sem fio do próprio aparelho.
+- `portai desktop tela`: resolução (nativa/escalada/personalizada), escala, tela cheia, modo de toque, orientação e barra de teclas no Termux:X11; tema escuro/claro, ícones (Papirus/Adwaita) e tamanho do texto dentro do Linux.
+- `portai desktop pacotes buscar|instalar|remover|populares`: gerenciador de programas pelo apt/dnf/pacman; Muon e Synaptic com atalho que abre como administrador.
+- Novo ambiente **Dock** (Openbox + plank) para Ubuntu, Debian e Fedora; comando `android` dentro do Linux (abrir links/rodar comandos do Android).
+
 ## 0.4.2
 - Desktop Linux com aceleração de vídeo pela GPU do tablet: `portai desktop iniciar --gpu` liga o virgl (`virglrenderer-android`, oficial do Termux) e usa `GALLIUM_DRIVER=virpipe` no Linux; `--sem-gpu` volta ao desenho pelo processador. A escolha fica salva.
 

@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_HOME = portai_toolkit.data_home()
 REPORTS = DATA_HOME / "relatorios"
 WORKSPACES = DATA_HOME / "workspaces"
-VERSION = "0.4.2"
+VERSION = "0.5.0"
 MAX_FILES = 3000
 MAX_TEXT_BYTES = 1_000_000
 MAX_SCAN_DIRS = 25000
@@ -1765,6 +1765,27 @@ def build_parser():
     g = ds.add_mutually_exclusive_group()
     g.add_argument("--gpu", dest="gpu", action="store_true", default=None, help="aceleração de vídeo pela GPU do tablet (virgl)")
     g.add_argument("--sem-gpu", dest="gpu", action="store_false", help="desenho só pelo processador (mais compatível)")
+    u = ds.add_mutually_exclusive_group()
+    u.add_argument("--root", dest="as_root", action="store_true", default=None, help="entra como root (padrão: usuário portai com sudo)")
+    u.add_argument("--usuario", dest="as_root", action="store_false", help="entra como o usuário comum portai")
+    dsub.add_parser("limitador", help="desliga o limitador de processos do Android (evita o desktop fechar sozinho)")
+    dt = dsub.add_parser("tela", help="resolução, escala, toque, orientação, tema escuro/claro e tamanho do texto")
+    dt.add_argument("--resolucao", dest="modo", choices=["native", "scaled", "custom"], help="native (do tablet), scaled (escala %%) ou custom (tamanho)")
+    dt.add_argument("--tamanho", help="para custom: LARGURAxALTURA, ex.: 1920x1080")
+    dt.add_argument("--escala", type=int, help="para scaled: 30 a 300 (%%)")
+    dt.add_argument("--tela-cheia", dest="tela_cheia", action=argparse.BooleanOptionalAction, default=None)
+    dt.add_argument("--toque", choices=["trackpad", "tela", "direto"], help="trackpad, tela (touchscreen simulado) ou direto")
+    dt.add_argument("--orientacao", choices=["auto", "landscape", "portrait", "reverse landscape", "reverse portrait"])
+    dt.add_argument("--teclas", action=argparse.BooleanOptionalAction, default=None, help="barra extra de teclas")
+    dt.add_argument("--tema", choices=["escuro", "claro"])
+    dt.add_argument("--texto", type=int, help="tamanho do texto/apps no Linux: 50 a 300 (%%)")
+    dt.add_argument("--icones", choices=["padrao", "papirus", "papirus-escuro", "papirus-claro"], help="tema de ícones")
+    dt.add_argument("--json", action="store_true")
+    dp = dsub.add_parser("pacotes", help="gerenciador de programas: buscar, instalar, remover, populares")
+    dp.add_argument("acao", choices=["buscar", "instalar", "remover", "populares"])
+    dp.add_argument("termos", nargs="*", help="texto da busca ou nomes dos pacotes")
+    dp.add_argument("--sistema", default=None, help="padrão: o sistema escolhido no desktop")
+    dp.add_argument("--json", action="store_true")
     dsub.add_parser("parar", help="fecha o desktop")
     dsub.add_parser("status", help="estado em JSON")
     vmp = sub.add_parser("vm", help="roda sistemas (ISO/IMG/QCOW2…) que estão no aparelho, com QEMU na tela do Termux:X11")
@@ -1856,6 +1877,46 @@ def desktop_cli(args) -> int:
     if cmd == "parar":
         console.print("Desktop fechado." if pd.stop() else "Nenhum desktop aberto.")
         return 0
+    if cmd == "limitador":
+        return subprocess.run(["bash", "-c", pd.LIMITADOR_SCRIPT], check=False).returncode
+    if cmd == "pacotes":
+        system = args.sistema or pd.load_config().get("system", "ubuntu")
+        try:
+            if args.acao == "populares":
+                data = pd.popular(system)
+            elif args.acao == "buscar":
+                data = pd.search_packages(system, " ".join(args.termos))
+            else:
+                step = pd.package_command(system, "install" if args.acao == "instalar" else "remove", args.termos)
+                console.print(f"[dim]$ {' '.join(step[-1:])}[/]")
+                code = subprocess.run(step, check=False).returncode
+                if code == 0 and args.acao == "instalar" and pd.store_launchers(system):
+                    console.print("[bright_green]Atalho da loja gráfica criado na área de trabalho do Linux.[/]")
+                return code
+        except (ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            console.print(f"[red]{exc}[/]")
+            return 1
+        if args.json:
+            print(json.dumps(data, ensure_ascii=False))
+        else:
+            for it in data:
+                mark = "✔" if it.get("installed") else " "
+                console.print(f"{mark} [bold]{it.get('name') or it.get('label')}[/]  [dim]{it.get('desc') or it.get('pkgs')}[/]")
+        return 0
+    if cmd == "tela":
+        keys = ("modo", "tamanho", "escala", "tela_cheia", "toque", "orientacao", "teclas", "tema", "texto", "icones")
+        try:
+            t, applied = pd.set_tela({k: getattr(args, k) for k in keys})
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/]")
+            return 1
+        if args.json:
+            print(json.dumps({"tela": t, "aplicado": applied}, ensure_ascii=False))
+        else:
+            console.print(json.dumps(t, ensure_ascii=False, indent=1))
+            console.print("Tela aplicada no Termux:X11." if applied else "Salvo — vale quando o desktop abrir.")
+            console.print("Tema e tamanho do texto valem ao abrir o desktop de novo.")
+        return 0
     cfg = pd.load_config()
     system = args.sistema or cfg.get("system", "ubuntu")
     desktop = args.ambiente or cfg.get("desktop", "xfce")
@@ -1866,7 +1927,7 @@ def desktop_cli(args) -> int:
             code = pd.install(system, desktop, echo=lambda line: console.print(f"[dim]{line}[/]"))
             console.print("[bright_green]Pronto! Toque em ▶ Abrir desktop no app PortAI.[/]" if code == 0 else f"[red]Falhou (código {code}).[/]")
             return code
-        info = pd.start(system, desktop, som=not args.sem_som, gpu=args.gpu)
+        info = pd.start(system, desktop, som=not args.sem_som, gpu=args.gpu, as_root=args.as_root)
         console.print(f"Desktop iniciando: {info['system']} + {info['desktop']} (pid {info['pid']}). Abra o app Termux:X11.")
         if args.gpu and not info["gpu"]:
             console.print("[yellow]Aceleração de vídeo indisponível (virglrenderer-android não instalou); abrindo sem GPU.[/]")
