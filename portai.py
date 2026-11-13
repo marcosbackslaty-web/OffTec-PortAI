@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_HOME = portai_toolkit.data_home()
 REPORTS = DATA_HOME / "relatorios"
 WORKSPACES = DATA_HOME / "workspaces"
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 MAX_FILES = 3000
 MAX_TEXT_BYTES = 1_000_000
 MAX_SCAN_DIRS = 25000
@@ -1762,6 +1762,9 @@ def build_parser():
     ds.add_argument("sistema", nargs="?", default=None)
     ds.add_argument("ambiente", nargs="?", default=None)
     ds.add_argument("--sem-som", action="store_true")
+    g = ds.add_mutually_exclusive_group()
+    g.add_argument("--gpu", dest="gpu", action="store_true", default=None, help="aceleração de vídeo pela GPU do tablet (virgl)")
+    g.add_argument("--sem-gpu", dest="gpu", action="store_false", help="desenho só pelo processador (mais compatível)")
     dsub.add_parser("parar", help="fecha o desktop")
     dsub.add_parser("status", help="estado em JSON")
     vmp = sub.add_parser("vm", help="roda sistemas (ISO/IMG/QCOW2…) que estão no aparelho, com QEMU na tela do Termux:X11")
@@ -1863,8 +1866,10 @@ def desktop_cli(args) -> int:
             code = pd.install(system, desktop, echo=lambda line: console.print(f"[dim]{line}[/]"))
             console.print("[bright_green]Pronto! Toque em ▶ Abrir desktop no app PortAI.[/]" if code == 0 else f"[red]Falhou (código {code}).[/]")
             return code
-        info = pd.start(system, desktop, som=not args.sem_som)
+        info = pd.start(system, desktop, som=not args.sem_som, gpu=args.gpu)
         console.print(f"Desktop iniciando: {info['system']} + {info['desktop']} (pid {info['pid']}). Abra o app Termux:X11.")
+        if args.gpu and not info["gpu"]:
+            console.print("[yellow]Aceleração de vídeo indisponível (virglrenderer-android não instalou); abrindo sem GPU.[/]")
         return 0
     except (ValueError, RuntimeError) as exc:
         console.print(f"[red]{exc}[/]")

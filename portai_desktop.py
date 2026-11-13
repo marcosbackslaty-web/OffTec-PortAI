@@ -65,7 +65,13 @@ DISTRO_INSTALL = {
 }
 DISTRO_SESSION = {"xfce": "startxfce4", "lxqt": "startlxqt", "openbox": "openbox-session"}
 
-HOST_PACKAGES = ["termux-x11-nightly", "pulseaudio"]
+HOST_PACKAGES = ["termux-x11-nightly", "pulseaudio", "virglrenderer-android"]
+
+# Aceleração de vídeo (GPU): o virgl_test_server_android do Termux repassa o
+# OpenGL do Linux para a GPU do tablet (via GLES do Android). Dentro do Linux o
+# Mesa usa o driver "virpipe", que conversa com ele pelo /tmp compartilhado.
+VIRGL_SERVER = "virgl_test_server_android"
+GPU_ENV = "GALLIUM_DRIVER=virpipe MESA_GL_VERSION_OVERRIDE=4.0 "
 
 # Navegador + ferramentas para o "Assistente IA" dentro do desktop.
 AI_EXTRAS = {"termux": "firefox jq curl", "ubuntu": "falkon jq curl", "debian": "firefox-esr jq curl",
@@ -150,7 +156,7 @@ def load_config() -> dict:
     try:
         return json.loads(config_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"system": "ubuntu", "desktop": "xfce", "som": True}
+        return {"system": "ubuntu", "desktop": "xfce", "som": True, "gpu": False}
 
 
 def save_config(cfg: dict) -> None:
@@ -198,10 +204,10 @@ def install(system: str, desktop: str, runner: Callable[..., subprocess.Complete
     return 0
 
 
-def startup_command(system: str, desktop: str, som: bool) -> str:
+def startup_command(system: str, desktop: str, som: bool, gpu: bool = False) -> str:
     """Comando que o termux-x11 executa dentro da tela (-xstartup)."""
     _check(system, desktop)
-    pulse = "PULSE_SERVER=tcp:127.0.0.1 " if som else ""
+    pulse = ("PULSE_SERVER=tcp:127.0.0.1 " if som else "") + (GPU_ENV if gpu else "")
     if system == "termux":
         return f"env {pulse}dbus-launch --exit-with-session {SYSTEMS['termux']['session'][desktop]}"
     return (f"proot-distro login {system} --shared-tmp -- env DISPLAY={DISPLAY} {pulse}"
@@ -277,7 +283,8 @@ def _pids(pattern: str) -> list[int]:
 
 
 def running() -> dict:
-    info = {"x11": bool(_pids("termux-x11")), "som": bool(_pids("pulseaudio")), "desktop": None}
+    info = {"x11": bool(_pids("termux-x11")), "som": bool(_pids("pulseaudio")), "gpu": bool(_pids("virgl_test_server")),
+            "desktop": None}
     for key, d in DESKTOPS.items():
         if any(_pids(p) for p in d["procs"]):
             info["desktop"] = key
@@ -285,18 +292,36 @@ def running() -> dict:
     return info
 
 
-def start(system: str | None = None, desktop: str | None = None, som: bool | None = None) -> dict:
+def start_gpu(log) -> bool:
+    """Liga o servidor virgl (instala o pacote oficial na 1ª vez). False se não deu."""
+    if _pids("virgl_test_server"):
+        return True
+    if not shutil.which(VIRGL_SERVER):
+        subprocess.run(["pkg", "install", "-y", "virglrenderer-android"], stdout=log, stderr=subprocess.STDOUT,
+                       stdin=subprocess.DEVNULL, check=False)
+    if not shutil.which(VIRGL_SERVER):
+        return False
+    subprocess.Popen([VIRGL_SERVER], stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                     start_new_session=True)
+    return True
+
+
+def start(system: str | None = None, desktop: str | None = None, som: bool | None = None,
+          gpu: bool | None = None) -> dict:
     cfg = load_config()
     system = system or cfg.get("system", "ubuntu")
     desktop = desktop or cfg.get("desktop", "xfce")
     som = cfg.get("som", True) if som is None else som
+    gpu = cfg.get("gpu", False) if gpu is None else gpu
     _check(system, desktop)
     if not is_installed(system, desktop):
         raise RuntimeError(f"{SYSTEMS[system]['label']} com {DESKTOPS[desktop]['label']} ainda não está instalado. "
                            f"Rode: portai desktop instalar {system} {desktop}")
     stop()
-    save_config({"system": system, "desktop": desktop, "som": som})
+    save_config({"system": system, "desktop": desktop, "som": som, "gpu": gpu})
     log = open(log_path(), "ab")
+    if gpu:
+        gpu = start_gpu(log)
     env = os.environ.copy()
     env["DISPLAY"] = DISPLAY
     if som and shutil.which("pulseaudio"):
@@ -308,14 +333,14 @@ def start(system: str | None = None, desktop: str | None = None, som: bool | Non
     except OSError:
         pass
     ai = ensure_ai_server()
-    proc = subprocess.Popen(["termux-x11", DISPLAY, "-xstartup", startup_command(system, desktop, som)], env=env,
+    proc = subprocess.Popen(["termux-x11", DISPLAY, "-xstartup", startup_command(system, desktop, som, gpu)], env=env,
                             stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
-    return {"pid": proc.pid, "system": system, "desktop": desktop, "som": som, "ia": ai, "log": str(log_path())}
+    return {"pid": proc.pid, "system": system, "desktop": desktop, "som": som, "gpu": gpu, "ia": ai, "log": str(log_path())}
 
 
 def stop() -> bool:
     killed = False
-    patterns = ["termux-x11", "proot-distro login"] + [p for d in DESKTOPS.values() for p in d["procs"]]
+    patterns = ["termux-x11", "proot-distro login", "virgl_test_server"] + [p for d in DESKTOPS.values() for p in d["procs"]]
     for pattern in patterns:
         for pid in _pids(pattern):
             try:

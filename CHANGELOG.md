@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.2
+- Desktop Linux com aceleração de vídeo pela GPU do tablet: `portai desktop iniciar --gpu` liga o virgl (`virglrenderer-android`, oficial do Termux) e usa `GALLIUM_DRIVER=virpipe` no Linux; `--sem-gpu` volta ao desenho pelo processador. A escolha fica salva.
+
 ## 0.4.1
 - `portai vm debian`: Debian fixa (VM persistente) num comando só — instala o QEMU, baixa uma vez o disco oficial Debian 13 já instalado (nocloud arm64, login root), aumenta para 20 GB e liga. `--apagar` remove o disco.
 

@@ -47,6 +47,11 @@ class DesktopTests(unittest.TestCase):
         self.assertIn("PULSE_SERVER", pd.startup_command("ubuntu", "xfce", True))
         self.assertNotIn("PULSE_SERVER", pd.startup_command("termux", "openbox", False))
         self.assertIn("openbox-session", pd.startup_command("termux", "openbox", False))
+        self.assertNotIn("virpipe", pd.startup_command("ubuntu", "xfce", True))
+        gpu = pd.startup_command("debian", "xfce", False, gpu=True)
+        self.assertIn("GALLIUM_DRIVER=virpipe", gpu)
+        self.assertLess(gpu.index("virpipe"), gpu.index("dbus-launch"))
+        self.assertIn("virglrenderer-android", " ".join(pd.install_commands("termux", "xfce")[1]))
 
     def test_invalid_choices(self):
         with self.assertRaises(ValueError):
