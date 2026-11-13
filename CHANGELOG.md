@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.4
+- Compatível com o proot-distro 5.x, que guarda os sistemas em `containers/<nome>/rootfs` (antes `installed-rootfs/<nome>`): sem isso o desktop instalado aparecia como "não instalado" e os scripts (`ia`, `android`, aparência, pasta Tablet) não eram colocados.
+
 ## 0.5.3
 - Corrige `portai desktop status` quebrando (KeyError 'dock') com Termux nativo — deixava a tela Desktop Linux do app com erro.
 - Instalação mais rápida: ícones Papirus saem do padrão (o cache deles levava 20-40 min no proot) e são instalados só quando escolhidos em Tela e aparência.

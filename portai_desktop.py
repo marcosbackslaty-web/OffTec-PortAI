@@ -631,8 +631,10 @@ def _check(system: str, desktop: str) -> None:
 
 
 def rootfs(system: str) -> Path:
-    prefix = Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"))
-    return prefix / "var" / "lib" / "proot-distro" / "installed-rootfs" / system
+    """Pasta do sistema instalado. proot-distro 5+ usa containers/<nome>/rootfs; o 4.x usava installed-rootfs/<nome>."""
+    base = Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr")) / "var" / "lib" / "proot-distro"
+    new, old = base / "containers" / system / "rootfs", base / "installed-rootfs" / system
+    return old if old.is_dir() and not new.is_dir() else new
 
 
 def install_commands(system: str, desktop: str) -> list[list[str]]:

@@ -219,5 +219,16 @@ class RegressionTests(unittest.TestCase):
             self.assertFalse(pd.falta_icones("debian", pd.check_tela({})))
 
 
+class RootfsPathTests(unittest.TestCase):
+    def test_new_and_old_layout(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PREFIX": tmp}):
+            base = Path(tmp) / "var" / "lib" / "proot-distro"
+            self.assertEqual(pd.rootfs("debian"), base / "containers" / "debian" / "rootfs")  # padrão: 5.x
+            (base / "installed-rootfs" / "debian").mkdir(parents=True)
+            self.assertEqual(pd.rootfs("debian"), base / "installed-rootfs" / "debian")  # instalação antiga
+            (base / "containers" / "debian" / "rootfs").mkdir(parents=True)
+            self.assertEqual(pd.rootfs("debian"), base / "containers" / "debian" / "rootfs")  # 5.x vence
+
+
 if __name__ == "__main__":
     unittest.main()
