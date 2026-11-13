@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+- GPU automática pelo fabricante real (getprop ro.hardware.egl): Adreno no Termux nativo usa Turnip + Zink (`mesa-zink`, `mesa-vulkan-icd-freedreno`, `vulkan-loader-android`); Mali e distros usam virgl.
+- Populares do Termux nativo: VS Code (`code-oss`) e programas do Windows com Wine Hangover (`hangover-wine`, `hangover-wowbox64`, do TUR), com `wine`/`winecfg` no PATH; ferramentas de rede (nmap, dig, whois) em todos os sistemas.
+
 ## 0.5.1
 - Pasta **Tablet** (armazenamento do aparelho) na pasta pessoal e na área de trabalho do Linux.
 - `portai desktop shell [sistema]`: terminal do Linux sem abrir o desktop.

@@ -243,6 +243,10 @@ POPULARES = [
     {"label": "Python + pip", "apt": "python3-pip", "dnf": "python3-pip", "pacman": "python-pip", "termux": "python"},
     {"label": "Node.js", "apt": "nodejs npm", "dnf": "nodejs npm", "pacman": "nodejs npm", "termux": "nodejs"},
     {"label": "Git", "apt": "git", "dnf": "git", "pacman": "git", "termux": "git"},
+    {"label": "VS Code (code-oss)", "termux": "code-oss"},
+    {"label": "Programas do Windows .exe (Wine Hangover)", "termux": "hangover-wine hangover-wowbox64"},
+    {"label": "Ferramentas de rede (nmap, dig, whois)", "apt": "nmap dnsutils whois", "dnf": "nmap bind-utils whois",
+     "pacman": "nmap bind whois", "termux": "nmap dnsutils whois"},
     {"label": "Falkon (navegador)", "apt": "falkon", "dnf": "falkon", "pacman": "falkon"},
     {"label": "Muon (loja gráfica do KDE)", "apt": "muon"},
     {"label": "Synaptic (loja gráfica)", "apt": "synaptic"},
@@ -325,7 +329,16 @@ def package_command(system: str, action: str, names: list[str]) -> list[str]:
     script = PKG_CMDS[fam][action].format(p=" ".join(shlex.quote(n) for n in check_pkgs(names)))
     if system == "termux":
         script = script.replace("apt-get", "pkg").replace("export DEBIAN_FRONTEND=noninteractive; pkg update -q && ", "")
+        if action == "install" and set(names) & TUR_PACKAGES:
+            # code-oss e hangover vêm do TUR (Termux User Repository, mantido na organização termux-user-repository).
+            script = "pkg install -y tur-repo x11-repo && " + script
+        if action == "install" and "hangover-wine" in names:
+            script = ("pkg remove -y wine-stable >/dev/null 2>&1; " + script + " && for b in wine winecfg wineserver; do "
+                      "[ -e $PREFIX/opt/hangover-wine/bin/$b ] && ln -sf $PREFIX/opt/hangover-wine/bin/$b $PREFIX/bin/$b; done; true")
     return pkg_shell(system, script)
+
+
+TUR_PACKAGES = {"code-oss", "hangover-wine", "hangover-wowbox64"}
 
 
 def popular(system: str) -> list[dict]:
@@ -481,6 +494,31 @@ HOST_PACKAGES = ["termux-x11-nightly", "pulseaudio", "virglrenderer-android"]
 # Mesa usa o driver "virpipe", que conversa com ele pelo /tmp compartilhado.
 VIRGL_SERVER = "virgl_test_server_android"
 GPU_ENV = "GALLIUM_DRIVER=virpipe MESA_GL_VERSION_OVERRIDE=4.0 "
+# Adreno (Snapdragon) no Termux nativo: OpenGL pelo Zink sobre o Vulkan Turnip
+# (freedreno), bem mais rápido que o virgl. Mali/outros: virgl.
+ZINK_ENV = ("GALLIUM_DRIVER=zink MESA_LOADER_DRIVER_OVERRIDE=zink TU_DEBUG=noconform ZINK_DESCRIPTORS=lazy "
+            "MESA_NO_ERROR=1 MESA_GL_VERSION_OVERRIDE=4.6 MESA_GLES_VERSION_OVERRIDE=3.2 ")
+ZINK_PACKAGES = ["mesa-zink", "mesa-vulkan-icd-freedreno", "vulkan-loader-android"]
+
+
+def gpu_vendor() -> str:
+    """Fabricante da GPU pelo próprio Android (adreno, mali, powervr…); "" se não souber."""
+    for prop in ("ro.hardware.egl", "ro.hardware.vulkan", "ro.board.platform"):
+        try:
+            r = subprocess.run(["getprop", prop], capture_output=True, text=True, timeout=5, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        v = r.stdout.strip().lower()
+        for name in ("adreno", "mali", "powervr", "xclipse"):
+            if name in v:
+                return name
+    return ""
+
+
+def gpu_mode(system: str, vendor: str | None = None) -> str:
+    """"zink" (Turnip) só no Termux nativo com Adreno; nos outros casos "virgl"."""
+    vendor = gpu_vendor() if vendor is None else vendor
+    return "zink" if system == "termux" and vendor == "adreno" else "virgl"
 
 # Navegador + ferramentas para o "Assistente IA" dentro do desktop.
 AI_EXTRAS = {"termux": "firefox jq curl", "ubuntu": "falkon jq curl", "debian": "firefox-esr jq curl",
@@ -622,7 +660,8 @@ def startup_command(system: str, desktop: str, som: bool, gpu: bool = False, use
                     extra_env: str = "") -> str:
     """Comando que o termux-x11 executa dentro da tela (-xstartup). user=None entra como root."""
     _check(system, desktop)
-    pulse = ("PULSE_SERVER=tcp:127.0.0.1 " if som else "") + (GPU_ENV if gpu else "") + COMPAT_ENV + extra_env
+    gpu_env = (ZINK_ENV if gpu == "zink" else GPU_ENV) if gpu else ""
+    pulse = ("PULSE_SERVER=tcp:127.0.0.1 " if som else "") + gpu_env + COMPAT_ENV + extra_env
     if system == "termux":
         return f"env {pulse}dbus-launch --exit-with-session {SYSTEMS['termux']['session'][desktop]}"
     who = f"--user {user} " if user else ""
@@ -775,6 +814,7 @@ def _pids(pattern: str) -> list[int]:
 
 def running() -> dict:
     info = {"x11": bool(_pids("termux-x11")), "som": bool(_pids("pulseaudio")), "gpu": bool(_pids("virgl_test_server")),
+            "gpu_vendor": gpu_vendor(),
             "desktop": None}
     for key, d in sorted(DESKTOPS.items(), key=lambda kv: kv[0] != "dock"):  # dock antes do openbox
         if any(_pids(p) for p in d["procs"]):
@@ -783,8 +823,14 @@ def running() -> dict:
     return info
 
 
-def start_gpu(log) -> bool:
-    """Liga o servidor virgl (instala o pacote oficial na 1ª vez). False se não deu."""
+def start_gpu(log, mode: str = "virgl") -> bool:
+    """Prepara a GPU: Zink/Turnip (pacotes oficiais) ou o servidor virgl. False se não deu."""
+    if mode == "zink":
+        prefix = Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"))
+        if not (prefix / "share" / "vulkan" / "icd.d" / "freedreno_icd.aarch64.json").exists():
+            subprocess.run(["pkg", "install", "-y", *ZINK_PACKAGES], stdout=log, stderr=subprocess.STDOUT,
+                           stdin=subprocess.DEVNULL, check=False)
+        return any((prefix / "share" / "vulkan" / "icd.d").glob("freedreno*.json"))
     if _pids("virgl_test_server"):
         return True
     if not shutil.which(VIRGL_SERVER):
@@ -814,7 +860,8 @@ def start(system: str | None = None, desktop: str | None = None, som: bool | Non
     save_config({**cfg, "system": system, "desktop": desktop, "som": som, "gpu": gpu, "root": as_root, "tela": tela})
     log = open(log_path(), "ab")
     if gpu:
-        gpu = start_gpu(log)
+        mode = gpu_mode(system)
+        gpu = mode if start_gpu(log, mode) else False
     env = os.environ.copy()
     env["DISPLAY"] = DISPLAY
     if som and shutil.which("pulseaudio"):

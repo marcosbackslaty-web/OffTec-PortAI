@@ -179,5 +179,26 @@ class ShellVncTablet(unittest.TestCase):
         self.assertEqual((a.desk_cmd, a.acao, a.json), ("vnc", "iniciar", True))
 
 
+class GpuAndToolsTests(unittest.TestCase):
+    def test_gpu_mode(self):
+        self.assertEqual(pd.gpu_mode("termux", "adreno"), "zink")
+        self.assertEqual(pd.gpu_mode("termux", "mali"), "virgl")
+        self.assertEqual(pd.gpu_mode("debian", "adreno"), "virgl")
+        z = pd.startup_command("termux", "xfce", False, gpu="zink")
+        self.assertIn("GALLIUM_DRIVER=zink", z)
+        self.assertNotIn("virpipe", z)
+        self.assertIn("virpipe", pd.startup_command("termux", "xfce", False, gpu="virgl"))
+
+    def test_tur_and_wine(self):
+        cmd = pd.package_command("termux", "install", ["hangover-wine", "hangover-wowbox64"])[-1]
+        self.assertTrue(cmd.startswith("pkg remove -y wine-stable"))
+        self.assertIn("pkg install -y tur-repo x11-repo && pkg install -y hangover-wine hangover-wowbox64", cmd)
+        self.assertIn("ln -sf $PREFIX/opt/hangover-wine/bin/$b", cmd)
+        self.assertNotIn("tur-repo", pd.package_command("termux", "install", ["vlc"])[-1])
+        labels = [x["label"] for x in pd.popular("termux")]
+        self.assertTrue(any("VS Code" in l for l in labels) and any("Wine" in l for l in labels))
+        self.assertFalse(any("Wine" in x["label"] for x in pd.popular("debian")))
+
+
 if __name__ == "__main__":
     unittest.main()
