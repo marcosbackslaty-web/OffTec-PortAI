@@ -367,6 +367,88 @@ def store_launchers(system: str) -> list[str]:
     return out
 
 
+def shell_command(system: str, as_root: bool = False) -> list[str]:
+    """Entra no terminal do Linux escolhido, sem abrir o desktop."""
+    if system not in SYSTEMS:
+        raise ValueError(f"Sistema desconhecido: {system}")
+    if system == "termux":
+        return ["bash", "-l"]
+    if not rootfs(system).is_dir():
+        raise RuntimeError(f"{SYSTEMS[system]['label']} ainda não está instalado. Rode: portai desktop instalar {system}")
+    who = [] if as_root or not has_user(system) else ["--user", USER]
+    return ["proot-distro", "login", system, *who, "--shared-tmp"]
+
+
+# VNC opcional: espelha a tela do Termux:X11 (:0) para ver/controlar pelo PC
+# ou outro aparelho no mesmo Wi-Fi. Sempre com senha; a tela principal continua
+# sendo o Termux:X11.
+VNC_PORT = 5900
+
+
+def vnc_pass_file() -> Path:
+    return Path.home() / ".config" / "portai" / "vnc.pass"
+
+
+def local_ip() -> str:
+    """IP do tablet no Wi-Fi (não envia nada: só consulta a rota)."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
+            sk.connect(("10.255.255.255", 1))
+            return sk.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
+def vnc_command(pass_file: str, port: int = VNC_PORT) -> list[str]:
+    return ["x11vnc", "-display", DISPLAY, "-forever", "-shared", "-rfbport", str(port), "-rfbauth", pass_file,
+            "-noxdamage", "-bg", "-o", str(_home() / "vnc.log")]
+
+
+def vnc_start(log=None) -> dict:
+    if not _pids("termux-x11"):
+        raise RuntimeError("Abra o desktop primeiro (▶ Abrir desktop) — o VNC mostra a mesma tela.")
+    if not shutil.which("x11vnc"):
+        subprocess.run(["pkg", "install", "-y", "x11vnc"], stdout=log or subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                       stdin=subprocess.DEVNULL, check=False)
+    if not shutil.which("x11vnc"):
+        raise RuntimeError("Não consegui instalar o x11vnc (pkg install x11vnc).")
+    pf = vnc_pass_file()
+    pf.parent.mkdir(parents=True, exist_ok=True)
+    cfg = load_config()
+    senha = cfg.get("vnc_senha")
+    if not senha or not pf.is_file():
+        import secrets
+        senha = "".join(secrets.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(8))
+        subprocess.run(["x11vnc", "-storepasswd", senha, str(pf)], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.STDOUT, check=True)
+        pf.chmod(0o600)
+        cfg["vnc_senha"] = senha
+        save_config(cfg)
+    if not _pids("x11vnc"):
+        env = os.environ.copy()
+        env["DISPLAY"] = DISPLAY
+        subprocess.run(vnc_command(str(pf)), env=env, stdout=log or subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                       stdin=subprocess.DEVNULL, check=False, timeout=60)
+    return vnc_status()
+
+
+def vnc_stop() -> bool:
+    killed = False
+    for pid in _pids("x11vnc"):
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed = True
+        except OSError:
+            pass
+    return killed
+
+
+def vnc_status() -> dict:
+    return {"rodando": bool(_pids("x11vnc")), "endereco": f"{local_ip()}:{VNC_PORT}",
+            "senha": load_config().get("vnc_senha", "")}
+
+
 # Limitador de processos do Android 12+ ("phantom process killer"): mata o
 # desktop quando o Termux passa de 32 processos. Desligar exige o adb do próprio
 # aparelho (Depuração sem fio) — ou a opção do desenvolvedor no Android 14+.
@@ -584,6 +666,30 @@ def setup_session(system: str, tela: dict | None = None) -> list[str]:
         f.write_text(text, encoding="utf-8")
         f.chmod(0o755)
         out.append(str(f))
+    out += tablet_links(system)
+    return out
+
+
+def tablet_links(system: str) -> list[str]:
+    """Pasta "Tablet" (o armazenamento do aparelho, /sdcard) na pasta pessoal e na área de trabalho."""
+    root = rootfs(system)
+    homes = [root / "root"] + ([root / "home" / USER] if (root / "home" / USER).is_dir() else [])
+    out = []
+    for h in homes:
+        for folder in (h, h / "Desktop"):
+            link = folder / "Tablet"
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                if link.is_symlink() and os.readlink(link) == "/sdcard":
+                    continue  # já existe
+                if link.is_symlink():
+                    link.unlink()
+                elif link.exists():
+                    continue  # pasta "Tablet" do usuário: não mexe
+                link.symlink_to("/sdcard")
+                out.append(str(link))
+            except OSError:
+                pass
     return out
 
 
@@ -736,7 +842,7 @@ def start(system: str | None = None, desktop: str | None = None, som: bool | Non
 
 def stop() -> bool:
     killed = False
-    patterns = ["termux-x11", "proot-distro login", "virgl_test_server"] + [p for d in DESKTOPS.values() for p in d["procs"]]
+    patterns = ["termux-x11", "proot-distro login", "virgl_test_server", "x11vnc"] + [p for d in DESKTOPS.values() for p in d["procs"]]
     for pattern in patterns:
         for pid in _pids(pattern):
             try:

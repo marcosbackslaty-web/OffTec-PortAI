@@ -48,7 +48,7 @@ class DockAndAndroidTests(unittest.TestCase):
             pd.rootfs("debian").mkdir(parents=True)
             out = pd.setup_session("debian")
             bin_dir = pd.rootfs("debian") / "usr" / "local" / "bin"
-            self.assertEqual(len(out), 3)
+            self.assertEqual(len([o for o in out if "/bin/" in o]), 3)
             self.assertTrue((bin_dir / "portai-aparencia").is_file())
             self.assertIn("plank", (bin_dir / "portai-dock").read_text())
             self.assertIn("android.intent.action.VIEW", (bin_dir / "android").read_text())
@@ -139,6 +139,44 @@ class PacotesTests(unittest.TestCase):
             out = pd.store_launchers("debian")
             self.assertTrue(any(o.endswith("Desktop/portai-muon.desktop") for o in out))
             self.assertIn("sudo -E muon", (root / "root" / "Desktop" / "portai-muon.desktop").read_text())
+
+
+class ShellVncTablet(unittest.TestCase):
+    def test_tablet_links(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PREFIX": tmp}):
+            root = pd.rootfs("debian")
+            (root / "home" / "portai").mkdir(parents=True)
+            out = pd.tablet_links("debian")
+            self.assertEqual(len(out), 4)
+            self.assertEqual(os.readlink(root / "home" / "portai" / "Desktop" / "Tablet"), "/sdcard")
+            self.assertEqual(pd.tablet_links("debian"), [])  # já existem: não recria
+
+    def test_shell_command(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PREFIX": tmp}):
+            with self.assertRaises(RuntimeError):
+                pd.shell_command("debian")
+            root = pd.rootfs("debian")
+            (root / "etc").mkdir(parents=True)
+            (root / "home" / "portai").mkdir(parents=True)
+            (root / "etc" / "passwd").write_text("portai:x:1000:1000::/home/portai:/bin/bash\n")
+            self.assertEqual(pd.shell_command("debian"), ["proot-distro", "login", "debian", "--user", "portai", "--shared-tmp"])
+            self.assertNotIn("--user", pd.shell_command("debian", as_root=True))
+        self.assertEqual(pd.shell_command("termux"), ["bash", "-l"])
+
+    def test_vnc(self):
+        cmd = pd.vnc_command("/x/pass")
+        self.assertIn("-rfbauth", cmd)
+        self.assertIn("/x/pass", cmd)
+        self.assertNotIn("-nopw", cmd)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PORTAI_HOME": tmp}):
+            with patch.object(pd, "_pids", return_value=[]):
+                with self.assertRaises(RuntimeError):
+                    pd.vnc_start()
+                self.assertFalse(pd.vnc_status()["rodando"])
+                self.assertTrue(pd.vnc_status()["endereco"].endswith(":5900"))
+        import portai
+        a = portai.build_parser().parse_args(["desktop", "vnc", "iniciar", "--json"])
+        self.assertEqual((a.desk_cmd, a.acao, a.json), ("vnc", "iniciar", True))
 
 
 if __name__ == "__main__":

@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_HOME = portai_toolkit.data_home()
 REPORTS = DATA_HOME / "relatorios"
 WORKSPACES = DATA_HOME / "workspaces"
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 MAX_FILES = 3000
 MAX_TEXT_BYTES = 1_000_000
 MAX_SCAN_DIRS = 25000
@@ -1781,6 +1781,12 @@ def build_parser():
     dt.add_argument("--texto", type=int, help="tamanho do texto/apps no Linux: 50 a 300 (%%)")
     dt.add_argument("--icones", choices=["padrao", "papirus", "papirus-escuro", "papirus-claro"], help="tema de ícones")
     dt.add_argument("--json", action="store_true")
+    dsh = dsub.add_parser("shell", help="abre o terminal do Linux escolhido, sem o desktop")
+    dsh.add_argument("sistema", nargs="?", default=None)
+    dsh.add_argument("--root", action="store_true")
+    dv = dsub.add_parser("vnc", help="ver/controlar o desktop pelo PC (VNC com senha, mesmo Wi-Fi)")
+    dv.add_argument("acao", choices=["iniciar", "parar", "status"])
+    dv.add_argument("--json", action="store_true")
     dp = dsub.add_parser("pacotes", help="gerenciador de programas: buscar, instalar, remover, populares")
     dp.add_argument("acao", choices=["buscar", "instalar", "remover", "populares"])
     dp.add_argument("termos", nargs="*", help="texto da busca ou nomes dos pacotes")
@@ -1879,6 +1885,35 @@ def desktop_cli(args) -> int:
         return 0
     if cmd == "limitador":
         return subprocess.run(["bash", "-c", pd.LIMITADOR_SCRIPT], check=False).returncode
+    if cmd == "shell":
+        system = args.sistema or pd.load_config().get("system", "ubuntu")
+        try:
+            argv = pd.shell_command(system, args.root)
+        except (ValueError, RuntimeError) as exc:
+            console.print(f"[red]{exc}[/]")
+            return 1
+        return subprocess.run(argv, check=False).returncode
+    if cmd == "vnc":
+        try:
+            if args.acao == "iniciar":
+                data = pd.vnc_start()
+            elif args.acao == "parar":
+                data = {**pd.vnc_status(), "parado": pd.vnc_stop()}
+            else:
+                data = pd.vnc_status()
+        except (RuntimeError, subprocess.SubprocessError) as exc:
+            if args.json:
+                print(json.dumps({"erro": str(exc)}, ensure_ascii=False))
+                return 1
+            console.print(f"[red]{exc}[/]")
+            return 1
+        if args.json:
+            print(json.dumps(data, ensure_ascii=False))
+        elif data.get("rodando"):
+            console.print(f"VNC ligado: [bold]{data['endereco']}[/]  senha: [bold]{data['senha']}[/] (só no mesmo Wi-Fi)")
+        else:
+            console.print("VNC desligado.")
+        return 0
     if cmd == "pacotes":
         system = args.sistema or pd.load_config().get("system", "ubuntu")
         try:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+- Pasta **Tablet** (armazenamento do aparelho) na pasta pessoal e na área de trabalho do Linux.
+- `portai desktop shell [sistema]`: terminal do Linux sem abrir o desktop.
+- `portai desktop vnc iniciar|parar|status`: ver/controlar o desktop pelo PC com x11vnc (oficial do Termux), sempre com senha, espelhando o Termux:X11.
+
 ## 0.5.0
 - Desktop entra como usuário comum `portai` (sudo sem senha); `--root` volta ao antigo. Ajustes para navegadores/Electron no proot (sem sandbox) e helper do dbus com setuid.
 - `portai desktop limitador`: desliga o limitador de processos do Android 12+ (o que fecha o desktop sozinho) pelo adb sem fio do próprio aparelho.
