@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.3
+- Corrige `portai desktop status` quebrando (KeyError 'dock') com Termux nativo — deixava a tela Desktop Linux do app com erro.
+- Instalação mais rápida: ícones Papirus saem do padrão (o cache deles levava 20-40 min no proot) e são instalados só quando escolhidos em Tela e aparência.
+
 ## 0.5.2
 - GPU automática pelo fabricante real (getprop ro.hardware.egl): Adreno no Termux nativo usa Turnip + Zink (`mesa-zink`, `mesa-vulkan-icd-freedreno`, `vulkan-loader-android`); Mali e distros usam virgl.
 - Populares do Termux nativo: VS Code (`code-oss`) e programas do Windows com Wine Hangover (`hangover-wine`, `hangover-wowbox64`, do TUR), com `wine`/`winecfg` no PATH; ferramentas de rede (nmap, dig, whois) em todos os sistemas.

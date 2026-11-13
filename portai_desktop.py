@@ -112,11 +112,12 @@ esac
 # de ambiente da sessão Linux (valem ao abrir o desktop).
 TOQUE = {"trackpad": "1", "tela": "2", "direto": "3"}
 ICONES = {"padrao": "Adwaita", "papirus": "Papirus", "papirus-escuro": "Papirus-Dark", "papirus-claro": "Papirus-Light"}
-THEME_PACKAGES = "gnome-themes-extra papirus-icon-theme"
+# Papirus fica fora da instalação padrão: o cache de ícones dele leva 20-40 min no proot.
+THEME_PACKAGES = "gnome-themes-extra"
 ORIENTACOES = ["auto", "landscape", "portrait", "reverse landscape", "reverse portrait"]
 MODOS = ["native", "scaled", "custom"]
 TELA_PADRAO = {"modo": "native", "tamanho": "1920x1080", "escala": 100, "tela_cheia": True, "toque": "trackpad",
-               "orientacao": "auto", "teclas": True, "tema": "escuro", "texto": 100, "icones": "papirus"}
+               "orientacao": "auto", "teclas": True, "tema": "escuro", "texto": 100, "icones": "padrao"}
 
 
 def tela_config() -> dict:
@@ -198,6 +199,13 @@ def apply_x11(t: dict) -> bool:
         return False
     r = subprocess.run(["termux-x11-preference", *x11_pref_args(t)], capture_output=True, text=True, timeout=15, check=False)
     return r.returncode == 0
+
+
+def falta_icones(system: str, t: dict) -> bool:
+    """True se os ícones escolhidos (Papirus) ainda não estão instalados no sistema."""
+    if system == "termux" or not t["icones"].startswith("papirus") or not rootfs(system).is_dir():
+        return False
+    return not (rootfs(system) / "usr" / "share" / "icons" / "Papirus").is_dir()
 
 
 def set_tela(changes: dict) -> tuple[dict, bool]:
@@ -735,10 +743,10 @@ def tablet_links(system: str) -> list[str]:
 def is_installed(system: str, desktop: str) -> bool:
     if not shutil.which("termux-x11"):
         return False
-    if system == "termux":
-        return bool(shutil.which(SYSTEMS["termux"]["session"][desktop]))
     if DESKTOPS[desktop].get("only") and system not in DESKTOPS[desktop]["only"]:
         return False
+    if system == "termux":
+        return bool(shutil.which(SYSTEMS["termux"]["session"][desktop]))
     root = rootfs(system)
     return root.is_dir() and any((root / d / DESKTOP_BIN[desktop]).exists() for d in ("usr/bin", "bin", "usr/local/bin"))
 

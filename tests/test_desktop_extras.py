@@ -200,5 +200,24 @@ class GpuAndToolsTests(unittest.TestCase):
         self.assertFalse(any("Wine" in x["label"] for x in pd.popular("debian")))
 
 
+class RegressionTests(unittest.TestCase):
+    def test_status_all_systems_and_desktops(self):
+        # bug real no tablet: KeyError 'dock' no status com Termux nativo
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PREFIX": tmp, "PORTAI_HOME": tmp}),                 patch.object(pd.shutil, "which", return_value="/bin/x"), patch.object(pd, "_pids", return_value=[]):
+            st = pd.status()
+            self.assertFalse(st["systems"]["termux"]["installed"]["dock"])
+            self.assertIn("dock", st["desktops"])
+
+    def test_papirus_on_demand(self):
+        self.assertNotIn("papirus", pd.THEME_PACKAGES)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"PREFIX": tmp}):
+            pd.rootfs("debian").mkdir(parents=True)
+            t = pd.check_tela({"icones": "papirus-escuro"})
+            self.assertTrue(pd.falta_icones("debian", t))
+            (pd.rootfs("debian") / "usr" / "share" / "icons" / "Papirus").mkdir(parents=True)
+            self.assertFalse(pd.falta_icones("debian", t))
+            self.assertFalse(pd.falta_icones("debian", pd.check_tela({})))
+
+
 if __name__ == "__main__":
     unittest.main()

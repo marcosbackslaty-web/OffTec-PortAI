@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_HOME = portai_toolkit.data_home()
 REPORTS = DATA_HOME / "relatorios"
 WORKSPACES = DATA_HOME / "workspaces"
-VERSION = "0.5.2"
+VERSION = "0.5.3"
 MAX_FILES = 3000
 MAX_TEXT_BYTES = 1_000_000
 MAX_SCAN_DIRS = 25000
@@ -1946,7 +1946,9 @@ def desktop_cli(args) -> int:
             console.print(f"[red]{exc}[/]")
             return 1
         if args.json:
-            print(json.dumps({"tela": t, "aplicado": applied}, ensure_ascii=False))
+            system = pd.load_config().get("system", "ubuntu")
+            print(json.dumps({"tela": t, "aplicado": applied, "sistema": system,
+                              "falta_icones": pd.falta_icones(system, t)}, ensure_ascii=False))
         else:
             console.print(json.dumps(t, ensure_ascii=False, indent=1))
             console.print("Tela aplicada no Termux:X11." if applied else "Salvo — vale quando o desktop abrir.")
