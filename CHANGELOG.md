@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.1
+- `portai vm debian`: Debian fixa (VM persistente) num comando só — instala o QEMU, baixa uma vez o disco oficial Debian 13 já instalado (nocloud arm64, login root), aumenta para 20 GB e liga. `--apagar` remove o disco.
+
 ## 0.4.0
 - Desktop Linux na tela com Termux:X11: `portai desktop instalar|iniciar|parar|status` — sistemas Termux nativo, Ubuntu, Debian, Fedora e Arch (proot-distro) com XFCE, LXQt ou Openbox, som via PulseAudio.
 - `install.sh`: instalador único para Termux usando o repositório oficial (packages-cf.termux.dev), perfis `--base`/completo, comando `portai` e atalho Termux:Widget.

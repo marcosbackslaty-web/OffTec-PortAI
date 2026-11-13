@@ -24,6 +24,9 @@ ARCHES = {
 }
 MIN_SIZE = 8 * 1024 * 1024
 DISPLAY = ":0"
+# Debian fixa: disco já instalado (imagem "nocloud" oficial, entra como root sem senha).
+DEBIAN_URL = "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-nocloud-arm64.qcow2"
+DEBIAN_NAME = "debian-fixa.qcow2"
 
 
 def vms_dir() -> Path:
@@ -136,6 +139,21 @@ def ensure_disk(image: str, size: str = "32G") -> str:
     return str(disk)
 
 
+def debian_path() -> Path:
+    return vms_dir() / DEBIAN_NAME
+
+
+def debian_prepare_commands(size: str = "20G") -> list[list[str]]:
+    """Baixa (uma vez) o disco Debian oficial e aumenta para `size`. Vazio se já existe."""
+    disk = debian_path()
+    if disk.exists():
+        return []
+    part = str(disk) + ".part"
+    return [["curl", "-L", "--fail", "-C", "-", "-o", part, DEBIAN_URL],
+            ["qemu-img", "resize", part, size],
+            ["mv", part, str(disk)]]
+
+
 def _pids(pattern: str) -> list[int]:
     if not shutil.which("pgrep"):
         return []
@@ -183,5 +201,6 @@ def status() -> dict:
         "arches": {k: {"label": a["label"], "installed": bool(shutil.which(a["bin"]))} for k, a in ARCHES.items()},
         "running": bool(_pids("qemu-system-")),
         "roots": [str(r) for r in search_roots()],
+        "debian": {"path": str(debian_path()), "exists": debian_path().exists()},
         "log_tail": tail,
     }

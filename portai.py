@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_HOME = portai_toolkit.data_home()
 REPORTS = DATA_HOME / "relatorios"
 WORKSPACES = DATA_HOME / "workspaces"
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 MAX_FILES = 3000
 MAX_TEXT_BYTES = 1_000_000
 MAX_SCAN_DIRS = 25000
@@ -1775,6 +1775,11 @@ def build_parser():
     vs.add_argument("--ram", type=int, default=4096, help="memória em MB")
     vs.add_argument("--cpus", type=int, default=4)
     vs.add_argument("--disco", default="32G", help="tamanho do disco virtual criado para ISOs")
+    vd = vsub.add_parser("debian", help="Debian fixa: instala tudo, baixa um disco Debian já instalado (1ª vez) e liga a VM")
+    vd.add_argument("--ram", type=int, default=4096, help="memória em MB")
+    vd.add_argument("--cpus", type=int, default=4)
+    vd.add_argument("--disco", default="20G", help="tamanho do disco na 1ª vez")
+    vd.add_argument("--apagar", action="store_true", help="apaga o disco da Debian fixa (perde tudo)")
     vsub.add_parser("parar", help="desliga a máquina virtual")
     vsub.add_parser("status", help="estado em JSON")
     return parser
@@ -1801,12 +1806,42 @@ def vm_cli(args) -> int:
                     return code
             console.print("[bright_green]QEMU instalado.[/]")
             return 0
+        if cmd == "debian":
+            return vm_debian(vm, args)
         info = vm.start(args.arquivo, args.arch, args.ram, args.cpus, args.disco)
         console.print(f"Máquina virtual ligando ({info['arch']}). Abra o app Termux:X11.")
         return 0
     except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
         console.print(f"[red]{exc}[/]")
         return 1
+
+
+def vm_debian(vm, args) -> int:
+    """Debian fixa num comando só: QEMU + download (1ª vez) + liga."""
+    disk = vm.debian_path()
+    if args.apagar:
+        vm.stop()
+        for f in (disk, Path(str(disk) + ".part")):
+            f.unlink(missing_ok=True)
+        console.print("Disco da Debian fixa apagado.")
+        return 0
+    steps = []
+    if not shutil.which(vm.ARCHES["aarch64"]["bin"]) or not shutil.which("qemu-img") or not shutil.which("termux-x11"):
+        console.print("[bold]1/3[/] Instalando o QEMU e o Termux:X11…")
+        steps += vm.install_commands("aarch64")
+    prep = vm.debian_prepare_commands(args.disco)
+    if prep:
+        console.print("[bold]2/3[/] Baixando a Debian 13 oficial (≈ 400 MB, só na 1ª vez; se cair, rode de novo que continua)…")
+    for step in steps + prep:
+        console.print(f"[dim]$ {' '.join(step)}[/]")
+        code = subprocess.run(step, check=False).returncode
+        if code:
+            console.print("[red]Falhou. Rode de novo: portai vm debian[/]")
+            return code
+    vm.start(str(disk), "aarch64", args.ram, args.cpus)
+    console.print("[bold]3/3[/] [bright_green]Debian fixa ligando.[/] Abra o app Termux:X11 — login: [bold]root[/] (sem senha).")
+    console.print("Tudo o que instalar fica salvo. Desligue com 'poweroff' dentro dela ou: portai vm parar")
+    return 0
 
 
 def desktop_cli(args) -> int:

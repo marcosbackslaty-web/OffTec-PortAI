@@ -66,6 +66,20 @@ class VmTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             vm.start(str(self.base / "nao-existe.iso"))
 
+    def test_debian_fixa_downloads_once(self):
+        steps = vm.debian_prepare_commands("20G")
+        self.assertEqual([s[0] for s in steps], ["curl", "qemu-img", "mv"])
+        self.assertIn(vm.DEBIAN_URL, steps[0])
+        self.assertEqual(steps[-1][-1], str(vm.debian_path()))
+        vm.debian_path().write_bytes(b"x")
+        self.assertEqual(vm.debian_prepare_commands(), [])
+        self.assertTrue(vm.status()["debian"]["exists"])
+
+    def test_debian_cli_parses(self):
+        import portai
+        a = portai.build_parser().parse_args(["vm", "debian", "--ram", "6144"])
+        self.assertEqual((a.vm_cmd, a.ram, a.disco), ("debian", 6144, "20G"))
+
 
 class DesktopAiTests(unittest.TestCase):
     def test_setup_ai_writes_script_and_launchers_into_distro(self):
